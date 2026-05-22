@@ -1,0 +1,6 @@
+.DS_Store
+__pycache__/
+*.pyc
+*.log
+standby_flygolf_preview.jpg
+Desktop/.Project/MediaPlayer/noUSBVideo/
