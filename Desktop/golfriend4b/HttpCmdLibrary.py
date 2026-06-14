@@ -81,7 +81,7 @@ class build:
 		elif ErrorMsg=="5" :
 			return "取球碼不存在"
 		elif ErrorMsg=="6":
-			return "取球碼失效"
+			return "領球碼過期，請重新產生"
 		elif ErrorMsg=="9":
 			return "伺服器錯誤"
 		else:

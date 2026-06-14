@@ -41,6 +41,33 @@ import os
 from BallControl import *
 
 settings={'AudioMode':'hdmi','ScaleToScreen':'True',}
+
+# 圖片預載快取 — 啟動時載入所有 UI 圖片到記憶體，運行中不再讀磁碟
+_image_cache = {}
+
+def preload_images(screen_size):
+    """啟動時預載所有 UI 圖片到記憶體"""
+    image_files = {
+        'standby': os.path.join(BASE_PATH, 'standby.jpg'),
+        '2_1wireless': os.path.join(BASE_PATH, 'image/2_1wireless.png'),
+        '2_1NoWireless': os.path.join(BASE_PATH, 'image/2_1NoWireless.png'),
+        '2_3': os.path.join(BASE_PATH, 'image/2_3.jpg'),
+        '2_4': os.path.join(BASE_PATH, 'image/2_4.jpg'),
+        '3_1': os.path.join(BASE_PATH, 'image/3_1.jpg'),
+    }
+    w, h = screen_size.width(), screen_size.height()
+    for key, path in image_files.items():
+        if os.path.exists(path):
+            if key == 'standby':
+                _image_cache[key] = QtGui.QPixmap(path).scaled(
+                    screen_size, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
+            else:
+                _image_cache[key] = QtGui.QPixmap(path).scaled(
+                    w, h, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
+            print(f"Preloaded: {key} ({_image_cache[key].width()}x{_image_cache[key].height()})")
+        else:
+            print(f"Warning: image not found: {path}")
+    print(f"Image preload complete: {len(_image_cache)} images, ~{len(_image_cache) * 1.5:.0f}MB in memory")
 #settings={'AudioMode':'local','ScaleToScreen':'True',}
 mediaLocation='/Users/jef/Desktop/golfsrc/noUSBVideo/01.mp4'
 MediaStatus = True
@@ -49,7 +76,7 @@ GlobalPlayItem = list()
 GlobalPlayItemCounter = 0
 GlobalUSBFoler = '/media/pi/'
 GlobalNoUSBFolder = os.path.join(BASE_PATH, "noUSBVideo/")
-appVersion = 'V2.5 build:2026052174127'
+appVersion = 'V2.6 build:2026052309896'
 
 class MediaPlayer(QtWidgets.QWidget):
     def __init__(self, app, parent):
@@ -88,15 +115,27 @@ class MediaPlayer(QtWidgets.QWidget):
         screen_size = screen.size()
         self.resize(screen_size.width(), screen_size.height())
 
-        # 載入 standby 圖片
-        standbyImagePath = os.path.join(BASE_PATH, "standby.jpg")
+        # === 預載所有 UI 圖片到記憶體 ===
+        preload_images(screen_size)
+
+        # === 啟動畫面（立即顯示，不等網路）===
         self.standbyLabel = QtWidgets.QLabel(self)
-        pixmap = QtGui.QPixmap(standbyImagePath).scaled(
-            self.size(), QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
-        self.standbyLabel.setPixmap(pixmap)
         self.standbyLabel.setAlignment(QtCore.Qt.AlignCenter)
         self.standbyLabel.resize(self.width(), self.height())
+
+        splash_pixmap = QtGui.QPixmap(self.size())
+        splash_pixmap.fill(QtGui.QColor(15, 50, 30))
+        splash_painter = QtGui.QPainter(splash_pixmap)
+        splash_font = QtGui.QFont()
+        splash_font.setPointSize(int(self.height() * 0.04))
+        splash_font.setBold(True)
+        splash_painter.setFont(splash_font)
+        splash_painter.setPen(QtGui.QColor(255, 255, 255))
+        splash_painter.drawText(splash_pixmap.rect(), QtCore.Qt.AlignCenter, "系統啟動中，請稍候...")
+        splash_painter.end()
+        self.standbyLabel.setPixmap(splash_pixmap)
         self.standbyLabel.show()
+        self.app.processEvents()
 
         # 初始化 log 與控制邏輯
         self.Log = mLog()
@@ -104,6 +143,17 @@ class MediaPlayer(QtWidgets.QWidget):
 
         # 讀取裝置名稱
         self.DeviceName = self.fileGetContents(os.path.join(DEVICE_PATH, "DeviceName"))
+
+        # 偵測開機碟類型（SD 或 USB）
+        try:
+            with open('/proc/cmdline', 'r') as f:
+                cmdline = f.read()
+            if 'mmcblk' in cmdline:
+                self.bootType = 'SD'
+            else:
+                self.bootType = 'USB'
+        except:
+            self.bootType = '?'
 
         # PingTimer（例如背景通訊用途）
         self.PingTimer = 5
@@ -114,6 +164,10 @@ class MediaPlayer(QtWidgets.QWidget):
             print('Device Name:{}'.format(self.DeviceName))
         except:
             print('⚠️ 無法取得網路資訊')
+
+        # === 載入正式待機畫面（從預載快取）===
+        if 'standby' in _image_cache:
+            self.standbyLabel.setPixmap(_image_cache['standby'])
 
         # 設定鍵盤輸入處理
         print("設定鍵盤輸入處理")
@@ -185,19 +239,16 @@ class MediaPlayer(QtWidgets.QWidget):
     def _updateStatusOverlay(self):
         """重新繪製 standby 圖片 + 右上角狀態文字"""
         try:
-            standby_path = os.path.join(BASE_PATH, "standby.jpg")
-            if not os.path.exists(standby_path):
+            if 'standby' not in _image_cache:
                 return
 
-            pixmap = QtGui.QPixmap(standby_path).scaled(
-                self.size(), QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation
-            )
+            pixmap = _image_cache['standby'].copy()
 
             # 準備狀態文字（一行，含版本號）
             now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             net_type, ip_addr = self._getNetworkInfo()
             ping_text = f"{self._cachedPingMs:.0f}ms" if self._cachedPingMs >= 0 else "N/A"
-            status_line = f"{now}   {net_type}   IP: {ip_addr}   ping: {ping_text}   {appVersion}"
+            status_line = f"{self.DeviceName} [{self.bootType}]   {now}   {net_type}   IP: {ip_addr}   ping: {ping_text}   {appVersion}"
 
             # 決定燈號顏色
             if self._cachedPingMs < 0:
@@ -356,7 +407,15 @@ class MediaPlayer(QtWidgets.QWidget):
         dialog.close()
         if action == 'desktop':
             print("Exit to desktop, restoring panel")
-            subprocess.Popen(['wf-panel-pi'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # 恢復面板（相容 labwc/wf-panel-pi 和 LXDE/lxpanel）
+            try:
+                subprocess.Popen(['wf-panel-pi'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except FileNotFoundError:
+                pass
+            try:
+                subprocess.Popen(['lxpanel', '--profile', 'LXDE-pi'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except FileNotFoundError:
+                pass
             from PyQt5.QtWidgets import QApplication
             QApplication.quit()
         elif action == 'reboot':
@@ -404,9 +463,9 @@ class MediaPlayer(QtWidgets.QWidget):
 
     def get_ip(self):
         try:
-            # 嘗試透過連線外部地址來獲取本地IP（不會實際傳資料出去）
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(('8.8.8.8', 80))  # Google DNS，只用來取得本地網卡的IP
+            s.settimeout(3)
+            s.connect(('8.8.8.8', 80))
             ip = s.getsockname()[0]
             s.close()
             return ip
@@ -649,13 +708,8 @@ class MediaPlayer(QtWidgets.QWidget):
         # 直接呼叫 overlay 方法，它會載入 standby.jpg 並疊加狀態文字
         if hasattr(self, '_cachedNetQuality'):
             self._updateStatusOverlay()
-        else:
-            standby_path = os.path.join(BASE_PATH, "standby.jpg")
-            if os.path.exists(standby_path):
-                pixmap = QtGui.QPixmap(standby_path).scaled(
-                    self.size(), QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation
-                )
-                self.standbyLabel.setPixmap(pixmap)
+        elif 'standby' in _image_cache:
+            self.standbyLabel.setPixmap(_image_cache['standby'])
     
         
 
@@ -739,7 +793,6 @@ class MediaPlayer(QtWidgets.QWidget):
 
 
     def closeEvent(self,e):
-        self.saveSettings()
         if self.process is not None and self.process.poll() is None:
             self.process.stdin.write('q')
             self.process.terminate()
@@ -775,15 +828,15 @@ class TakeBallDialog(QtWidgets.QDialog):
         self.setInputMethodHints(QtCore.Qt.ImhPreferLatin | QtCore.Qt.ImhHiddenText)
 
 
-        # === 建立全螢幕 QLabel 當作背景圖層 ===
+        # === 建立全螢幕 QLabel 當作背景圖層（從預載快取）===
         self.bgLabel = QtWidgets.QLabel(self)
-        bg_path = "image/2_1wireless.png" if self.isConnect else "image/2_1NoWireless.png"
-        # pixmap = QtGui.QPixmap(bg_path).scaled(
-        #     w, h, QtCore.Qt.KeepAspectRatioByExpanding, QtCore.Qt.SmoothTransformation
-        # )
-        pixmap = QtGui.QPixmap(bg_path).scaled(
-            w, h, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation
-        )
+        cache_key = '2_1wireless' if self.isConnect else '2_1NoWireless'
+        if cache_key in _image_cache:
+            pixmap = _image_cache[cache_key]
+        else:
+            bg_path = "image/2_1wireless.png" if self.isConnect else "image/2_1NoWireless.png"
+            pixmap = QtGui.QPixmap(bg_path).scaled(
+                w, h, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
         self.bgLabel.setPixmap(pixmap)
         self.bgLabel.resize(w, h)
         self.bgLabel.move(0, 0)
@@ -991,14 +1044,13 @@ class TakeBallConfirmDialog(QtWidgets.QDialog):
         print(f"TakeBallConfirmDialog size = {w}x{h}")
 
 
-        # === 設定背景圖片，使用 QLabel 方式避免圖片超框 ===
+        # === 設定背景圖片（從預載快取）===
         self.bgLabel = QtWidgets.QLabel(self)
-        bg_path = "image/2_3.jpg"
-        pixmap = QtGui.QPixmap(bg_path).scaled(
-            w, h,
-            QtCore.Qt.IgnoreAspectRatio,    # KeepAspectRatioByExpanding,   # 或改成 Qt.KeepAspectRatio 視需求
-            QtCore.Qt.FastTransformation    # SmoothTransformation
-        )
+        if '2_3' in _image_cache:
+            pixmap = _image_cache['2_3']
+        else:
+            pixmap = QtGui.QPixmap("image/2_3.jpg").scaled(
+                w, h, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
         self.bgLabel.setPixmap(pixmap)
         self.bgLabel.resize(w, h)
         self.bgLabel.move(0, 0)
@@ -1147,14 +1199,13 @@ class ErrorDialog(QtWidgets.QDialog):
         self.setGeometry(0, 0, w, h)
         print(f"ErrorDialog size = {w}x{h}")
 
-        # === 設定背景圖片，使用 QLabel 方式避免超框 ===
+        # === 設定背景圖片（從預載快取）===
         self.bgLabel = QtWidgets.QLabel(self)
-        bg_path = "image/2_4.jpg"
-        pixmap = QtGui.QPixmap(bg_path).scaled(
-            w, h,
-            QtCore.Qt.IgnoreAspectRatio,      # 圖片強制縮放填滿整個螢幕，會變形但不裁切
-            QtCore.Qt.FastTransformation      # 較快速度的縮放（畫質略低但足夠）
-        )
+        if '2_4' in _image_cache:
+            pixmap = _image_cache['2_4']
+        else:
+            pixmap = QtGui.QPixmap("image/2_4.jpg").scaled(
+                w, h, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
         self.bgLabel.setPixmap(pixmap)
         self.bgLabel.resize(w, h)
         self.bgLabel.move(0, 0)
@@ -1247,14 +1298,13 @@ class SuccessDialog(QtWidgets.QDialog):
 
         print("SuccessDialog 設定背景圖片")
 
-        # === 設定背景圖片（使用 QLabel 替代 setPalette，避免圖片出框） ===
+        # === 設定背景圖片（從預載快取）===
         self.bgLabel = QtWidgets.QLabel(self)
-        bg_path = "image/3_1.jpg"
-        pixmap = QtGui.QPixmap(bg_path).scaled(
-            w, h,
-            QtCore.Qt.IgnoreAspectRatio,       # 或使用 KeepAspectRatio/ByExpanding 依你需求
-            QtCore.Qt.FastTransformation
-        )
+        if '3_1' in _image_cache:
+            pixmap = _image_cache['3_1']
+        else:
+            pixmap = QtGui.QPixmap("image/3_1.jpg").scaled(
+                w, h, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
         self.bgLabel.setPixmap(pixmap)
         self.bgLabel.resize(w, h)
         self.bgLabel.move(0, 0)
