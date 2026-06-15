@@ -146,9 +146,8 @@ class MediaPlayer(QtWidgets.QWidget):
 
         # 偵測開機碟類型（SD 或 USB）
         try:
-            with open('/proc/cmdline', 'r') as f:
-                cmdline = f.read()
-            if 'mmcblk' in cmdline:
+            root_dev = os.popen("findmnt / -n -o SOURCE").read().strip()
+            if 'mmcblk' in root_dev:
                 self.bootType = 'SD'
             else:
                 self.bootType = 'USB'
