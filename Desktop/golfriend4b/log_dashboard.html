@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Golfriend 裝置 Log 監控</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f1923; color: #e0e0e0; }
+
+  .header { background: #1a2a3a; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #2a3a4a; }
+  .header h1 { font-size: 20px; color: #fff; }
+  .header .subtitle { font-size: 13px; color: #8899aa; margin-left: 12px; }
+
+  .toolbar { display: flex; gap: 12px; padding: 16px 24px; background: #152030; flex-wrap: wrap; align-items: center; }
+  .toolbar label { font-size: 13px; color: #8899aa; }
+  .toolbar select, .toolbar input, .toolbar button {
+    background: #1a2a3a; color: #e0e0e0; border: 1px solid #2a3a4a;
+    padding: 8px 12px; border-radius: 6px; font-size: 14px;
+  }
+  .toolbar select:focus, .toolbar input:focus { outline: none; border-color: #4a9eff; }
+  .toolbar button { background: #2563eb; color: #fff; border: none; cursor: pointer; font-weight: 600; }
+  .toolbar button:hover { background: #3b82f6; }
+  .toolbar button.btn-refresh { background: #059669; }
+  .toolbar button.btn-refresh:hover { background: #10b981; }
+
+  .stats-bar { display: flex; gap: 16px; padding: 12px 24px; background: #101d2a; border-bottom: 1px solid #1a2a3a; }
+  .stat { padding: 8px 16px; border-radius: 6px; background: #1a2a3a; font-size: 13px; }
+  .stat .num { font-size: 20px; font-weight: 700; color: #fff; }
+
+  .device-chips { display: flex; gap: 8px; padding: 0 24px 12px; flex-wrap: wrap; }
+  .chip { padding: 4px 12px; border-radius: 12px; font-size: 12px; cursor: pointer; border: 1px solid #2a3a4a; background: #1a2a3a; }
+  .chip:hover { border-color: #4a9eff; }
+  .chip.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+  .chip .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .dot-green { background: #10b981; }
+  .dot-yellow { background: #f59e0b; }
+  .dot-red { background: #ef4444; }
+  .dot-gray { background: #6b7280; }
+
+  .log-container { padding: 0 24px 24px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 10px 12px; background: #1a2a3a; color: #8899aa; font-weight: 600; position: sticky; top: 0; }
+  td { padding: 8px 12px; border-bottom: 1px solid #1a2532; vertical-align: top; }
+  tr:hover { background: #152535; }
+
+  .level { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+  .level-DEBUG { background: #1e3a5f; color: #60a5fa; }
+  .level-INFO { background: #064e3b; color: #34d399; }
+  .level-WARNING { background: #78350f; color: #fbbf24; }
+  .level-ERROR { background: #7f1d1d; color: #f87171; }
+  .level-CRITICAL { background: #7f1d1d; color: #ff4444; font-size: 12px; }
+
+  .tag { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .tag-system { background: #1e3a5f; color: #60a5fa; }
+  .tag-operation { background: #064e3b; color: #34d399; }
+  .tag-exception { background: #7f1d1d; color: #f87171; }
+  .tag-info { background: #1e293b; color: #94a3b8; }
+
+  .device-tag { padding: 2px 8px; border-radius: 4px; font-size: 11px; background: #1e293b; color: #94a3b8; }
+  .msg { font-family: "SF Mono", Monaco, monospace; font-size: 12px; word-break: break-all; max-width: 600px; }
+
+  .empty { text-align: center; padding: 60px; color: #556677; font-size: 16px; }
+  .loading { text-align: center; padding: 40px; color: #4a9eff; }
+
+  .setup-panel { max-width: 500px; margin: 80px auto; padding: 32px; background: #1a2a3a; border-radius: 12px; border: 1px solid #2a3a4a; }
+  .setup-panel h2 { margin-bottom: 20px; color: #fff; }
+  .setup-panel input { width: 100%; margin-bottom: 16px; }
+  .setup-panel .hint { font-size: 12px; color: #667788; margin-bottom: 16px; line-height: 1.6; }
+
+  .auto-refresh { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #8899aa; }
+  .auto-refresh input[type=checkbox] { accent-color: #2563eb; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div style="display:flex;align-items:baseline;">
+    <h1>Golfriend Log 監控</h1>
+    <span class="subtitle">裝置即時 Log 查看器</span>
+  </div>
+  <div class="auto-refresh">
+    <input type="checkbox" id="autoRefresh" checked>
+    <label for="autoRefresh">自動更新 (10s)</label>
+  </div>
+</div>
+
+<!-- 設定面板（首次使用）-->
+<div class="setup-panel" id="setupPanel" style="display:none;">
+  <h2>設定 Better Stack API</h2>
+  <div class="hint">
+    請到 <a href="https://betterstack.com" target="_blank" style="color:#4a9eff;">Better Stack</a> →
+    Logs → Settings → API tokens，建立一個 <strong>Read-only</strong> token。
+  </div>
+  <label style="font-size:13px;color:#8899aa;">API Token</label>
+  <input type="text" id="setupToken" placeholder="輸入你的 Better Stack API Token">
+  <button onclick="saveSetup()" style="width:100%;">儲存並開始</button>
+</div>
+
+<!-- 主介面 -->
+<div id="mainUI" style="display:none;">
+  <div class="toolbar">
+    <div>
+      <label>店家</label>
+      <select id="filterStore">
+        <option value="">全部店家</option>
+        <option value="SBGF">松柏高爾夫</option>
+        <option value="TGSGF">鐵砧山高球中心</option>
+      </select>
+    </div>
+    <div>
+      <label>裝置</label>
+      <select id="filterDevice"><option value="">全部裝置</option></select>
+    </div>
+    <div>
+      <label>等級</label>
+      <select id="filterLevel">
+        <option value="">全部</option>
+        <option value="DEBUG">DEBUG</option>
+        <option value="INFO">INFO</option>
+        <option value="WARNING">WARNING</option>
+        <option value="ERROR">ERROR</option>
+        <option value="CRITICAL">CRITICAL</option>
+      </select>
+    </div>
+    <div>
+      <label>分類</label>
+      <select id="filterTag">
+        <option value="">全部分類</option>
+        <option value="system">系統性</option>
+        <option value="operation">操作性</option>
+        <option value="exception">例外狀況</option>
+        <option value="info">一般資訊</option>
+      </select>
+    </div>
+    <div>
+      <label>搜尋</label>
+      <input type="text" id="filterKeyword" placeholder="關鍵字...">
+    </div>
+    <button class="btn-refresh" onclick="fetchLogs()">重新整理</button>
+  </div>
+
+  <div class="stats-bar" id="statsBar"></div>
+
+  <div class="log-container">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:160px;">時間</th>
+          <th style="width:80px;">等級</th>
+          <th style="width:160px;">裝置</th>
+          <th style="width:80px;">分類</th>
+          <th>訊息</th>
+        </tr>
+      </thead>
+      <tbody id="logBody"></tbody>
+    </table>
+    <div class="empty" id="emptyMsg" style="display:none;">目前沒有符合條件的 Log</div>
+    <div class="loading" id="loadingMsg" style="display:none;">載入中...</div>
+  </div>
+</div>
+
+<script>
+const KNOWN_DEVICES = {
+  'SBGF_1F_M1RIGHT':  { store: '松柏高爾夫', location: '1F 右' },
+  'SBGF_1F_M1LEFT':   { store: '松柏高爾夫', location: '1F 左' },
+  'SBGF_2F_M1LEFT':   { store: '松柏高爾夫', location: '2F 左' },
+  'SBGF_2F_M1_RIGHT': { store: '松柏高爾夫', location: '2F 右' },
+  'TGSGF_1F_M1':      { store: '鐵砧山高球中心', location: '1F' },
+};
+
+let API_TOKEN = localStorage.getItem('logtail_api_token') || '';
+let autoRefreshTimer = null;
+let allLogs = [];
+let discoveredDevices = new Set();
+
+function init() {
+  if (!API_TOKEN) {
+    document.getElementById('setupPanel').style.display = 'block';
+    document.getElementById('mainUI').style.display = 'none';
+  } else {
+    document.getElementById('setupPanel').style.display = 'none';
+    document.getElementById('mainUI').style.display = 'block';
+    fetchLogs();
+    startAutoRefresh();
+  }
+
+  document.getElementById('filterStore').addEventListener('change', applyFilters);
+  document.getElementById('filterDevice').addEventListener('change', applyFilters);
+  document.getElementById('filterLevel').addEventListener('change', applyFilters);
+  document.getElementById('filterTag').addEventListener('change', applyFilters);
+  document.getElementById('filterKeyword').addEventListener('input', applyFilters);
+  document.getElementById('autoRefresh').addEventListener('change', (e) => {
+    if (e.target.checked) startAutoRefresh(); else stopAutoRefresh();
+  });
+}
+
+function saveSetup() {
+  const token = document.getElementById('setupToken').value.trim();
+  if (!token) { alert('請輸入 API Token'); return; }
+  API_TOKEN = token;
+  localStorage.setItem('logtail_api_token', token);
+  init();
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  autoRefreshTimer = setInterval(fetchLogs, 10000);
+}
+
+function stopAutoRefresh() {
+  if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+}
+
+async function fetchLogs() {
+  const loading = document.getElementById('loadingMsg');
+  loading.style.display = 'block';
+
+  try {
+    const res = await fetch('https://logs.betterstack.com/api/v1/query', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: '',
+        order: 'newest_first',
+        limit: 200,
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error('API error:', res.status, errText);
+      if (res.status === 401 || res.status === 403) {
+        alert('API Token 無效，請重新設定');
+        localStorage.removeItem('logtail_api_token');
+        API_TOKEN = '';
+        init();
+      }
+      return;
+    }
+
+    const data = await res.json();
+    allLogs = (data.data || []).map(entry => {
+      const attrs = entry.attributes || {};
+      return {
+        dt: attrs.dt || attrs.timestamp || '',
+        level: attrs.level || 'INFO',
+        device: attrs.device || 'UNKNOWN',
+        tag: attrs.tag || 'info',
+        message: attrs.message || JSON.stringify(attrs),
+      };
+    });
+
+    allLogs.forEach(l => discoveredDevices.add(l.device));
+    updateDeviceFilter();
+    updateStats();
+    applyFilters();
+  } catch (e) {
+    console.error('Fetch error:', e);
+  } finally {
+    loading.style.display = 'none';
+  }
+}
+
+function updateDeviceFilter() {
+  const sel = document.getElementById('filterDevice');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">全部裝置</option>';
+  [...discoveredDevices].sort().forEach(d => {
+    const info = KNOWN_DEVICES[d];
+    const label = info ? `${d} (${info.store} ${info.location})` : d;
+    sel.innerHTML += `<option value="${d}">${label}</option>`;
+  });
+  sel.value = current;
+}
+
+function updateStats() {
+  const bar = document.getElementById('statsBar');
+  const total = allLogs.length;
+  const errors = allLogs.filter(l => l.level === 'ERROR' || l.level === 'CRITICAL').length;
+  const devices = discoveredDevices.size;
+
+  bar.innerHTML = `
+    <div class="stat">Log 數量<br><span class="num">${total}</span></div>
+    <div class="stat">錯誤<br><span class="num" style="color:${errors > 0 ? '#f87171' : '#10b981'}">${errors}</span></div>
+    <div class="stat">裝置數<br><span class="num">${devices}</span></div>
+  `;
+}
+
+function applyFilters() {
+  const store = document.getElementById('filterStore').value;
+  const device = document.getElementById('filterDevice').value;
+  const level = document.getElementById('filterLevel').value;
+  const tag = document.getElementById('filterTag').value;
+  const keyword = document.getElementById('filterKeyword').value.toLowerCase();
+
+  const filtered = allLogs.filter(l => {
+    if (device && l.device !== device) return false;
+    if (store && !l.device.startsWith(store)) return false;
+    if (level && l.level !== level) return false;
+    if (tag && l.tag !== tag) return false;
+    if (keyword && !l.message.toLowerCase().includes(keyword)) return false;
+    return true;
+  });
+
+  renderLogs(filtered);
+}
+
+function renderLogs(logs) {
+  const body = document.getElementById('logBody');
+  const empty = document.getElementById('emptyMsg');
+
+  if (logs.length === 0) {
+    body.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  body.innerHTML = logs.map(l => {
+    const info = KNOWN_DEVICES[l.device];
+    const deviceLabel = info
+      ? `<span class="device-tag">${l.device}</span><br><span style="font-size:11px;color:#667">${info.store} ${info.location}</span>`
+      : `<span class="device-tag">${l.device}</span>`;
+
+    const dt = l.dt ? new Date(l.dt).toLocaleString('zh-TW', { hour12: false }) : '';
+
+    const TAG_LABELS = { system: '系統', operation: '操作', exception: '例外', info: '資訊' };
+    const tagLabel = TAG_LABELS[l.tag] || l.tag;
+
+    return `<tr>
+      <td style="color:#8899aa;font-size:12px;">${dt}</td>
+      <td><span class="level level-${l.level}">${l.level}</span></td>
+      <td>${deviceLabel}</td>
+      <td><span class="tag tag-${l.tag}">${tagLabel}</span></td>
+      <td class="msg">${escapeHtml(l.message)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+init();
+</script>
+</body>
+</html>
