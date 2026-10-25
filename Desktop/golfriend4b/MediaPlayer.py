@@ -8,6 +8,22 @@ import subprocess
 import os
 import platform
 import socket
+import fcntl
+
+LOCK_FILE = '/tmp/mediaplayer.lock'
+
+def acquire_single_instance():
+    fp = open(LOCK_FILE, 'w')
+    try:
+        fcntl.flock(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fp.write(str(os.getpid()))
+        fp.flush()
+        return fp
+    except IOError:
+        print("MediaPlayer already running, exiting.")
+        raise SystemExit(1)
+
+_lock_fp = acquire_single_instance()
 
 
 if platform.system() == "Darwin":
@@ -76,7 +92,7 @@ GlobalPlayItem = list()
 GlobalPlayItemCounter = 0
 GlobalUSBFoler = '/media/pi/'
 GlobalNoUSBFolder = os.path.join(BASE_PATH, "noUSBVideo/")
-appVersion = 'V2.6 build:2026052309896'
+appVersion = 'V2.6 build:2026062817'
 
 class MediaPlayer(QtWidgets.QWidget):
     def __init__(self, app, parent):
@@ -246,8 +262,9 @@ class MediaPlayer(QtWidgets.QWidget):
             # 準備狀態文字（一行，含版本號）
             now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             net_type, ip_addr = self._getNetworkInfo()
-            ping_text = f"{self._cachedPingMs:.0f}ms" if self._cachedPingMs >= 0 else "N/A"
-            status_line = f"{self.DeviceName} [{self.bootType}]   {now}   {net_type}   IP: {ip_addr}   ping: {ping_text}   {appVersion}"
+            ping_text = f"{self._cachedPingMs:03.0f}ms" if self._cachedPingMs >= 0 else "---"
+            ip_hex = '.'.join(f'{int(o):02X}' for o in ip_addr.split('.')) if ip_addr != 'N/A' else '---'
+            status_line = f"{self.DeviceName} [{self.bootType}]   {now}   {net_type}   {ip_hex}   {ping_text}   {appVersion}"
 
             # 決定燈號顏色
             if self._cachedPingMs < 0:
@@ -272,6 +289,7 @@ class MediaPlayer(QtWidgets.QWidget):
             status_w = fm.horizontalAdvance(status_line)
             line_h = fm.height()
             bar_w = dot_size + 6 + status_w + padding * 2
+            bar_w = min(bar_w, pixmap.width() - 4)
             bar_h = line_h + padding * 2
 
             # 貼底居中
@@ -644,7 +662,7 @@ class MediaPlayer(QtWidgets.QWidget):
                     ErrorTakeBalldialog = ErrorDialog(self, httpR.error_description, httpR.transaction_code, self.Log)
                     ErrorTakeBalldialog.exec_()
             elif(httpR.ProcessTag == "TakeBall"):
-                TakeBallConfirmdialog = TakeBallConfirmDialog(self, httpR, self.Log, 2)
+                TakeBallConfirmdialog = TakeBallConfirmDialog(self, httpR, self.Log, 5)
                 TakeBallConfirmdialog.exec_()
                 if(httpR.error_code):
                     print("TakeBallConfirmdialog, httpR:ErrorDialog")
@@ -799,7 +817,7 @@ class MediaPlayer(QtWidgets.QWidget):
 
 class TakeBallDialog(QtWidgets.QDialog):
     def __init__(self, parent, httpR, tmplog):
-        QtWidgets.QDialog.__init__(self, parent, QtCore.Qt.FramelessWindowHint)
+        QtWidgets.QDialog.__init__(self, parent, QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint)
         self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
         self.setCursor(QtGui.QCursor(QtCore.Qt.BlankCursor))
 
@@ -1032,7 +1050,7 @@ class TakeBallDialog(QtWidgets.QDialog):
 class TakeBallConfirmDialog(QtWidgets.QDialog):
     def __init__(self, parent, httpR, tmplog, autoconfirm_second=0):
         # 建立無邊框全螢幕對話框
-        QtWidgets.QDialog.__init__(self, parent, QtCore.Qt.FramelessWindowHint)
+        QtWidgets.QDialog.__init__(self, parent, QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint)
         self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
         # 不隱藏游標，讓觸控螢幕的取消按鈕可以正常使用
 
@@ -1123,6 +1141,11 @@ class TakeBallConfirmDialog(QtWidgets.QDialog):
         self.tmpHttpR = httpR
         self.Lock = False
         self.timeout = None
+        self._keyGuardActive = True
+        self.Log.i(f"TakeBallConfirmDialog_KeyGuard ON, autoconfirm={autoconfirm_second}s")
+
+        # === 1 秒內忽略按鍵（防止掃碼器殘留 Enter 直接觸發確認）===
+        QtCore.QTimer.singleShot(1000, self._disableKeyGuard)
 
         # === 自動確認機制（預設為等待 2 秒自動執行）===
         if autoconfirm_second > 0:
@@ -1130,8 +1153,12 @@ class TakeBallConfirmDialog(QtWidgets.QDialog):
         else:
             self.start_timer(10)  # 如果未設定則等 10 秒
 
+    def _disableKeyGuard(self):
+        self._keyGuardActive = False
+        self.Log.i("TakeBallConfirmDialog_KeyGuard OFF")
 
     def autoConfirm(self):
+        self.Log.i("TakeBallConfirmDialog_AutoConfirm triggered")
         self.ConfirmOk()
 
     def handleCancel(self):
@@ -1140,13 +1167,15 @@ class TakeBallConfirmDialog(QtWidgets.QDialog):
         self.CloseDialog()
 
     def keyPressEvent(self, event):
-        print("MimeDialog,  key down")
-        print(event.key())
-        self.timeoutFlag = False
         EK = event.key()
+        self.Log.i(f"TakeBallConfirmDialog_KeyPress, key={EK}, guard={self._keyGuardActive}")
+        if self._keyGuardActive:
+            self.Log.i(f"TakeBallConfirmDialog_KeyPress BLOCKED (guard active)")
+            return
+        self.timeoutFlag = False
         if EK == Qt.Key_0:
             self.CloseDialog()
-        elif EK in (Qt.Key_Return, Qt.Key_Enter):  # 同時攔截主鍵盤與數字區的 Enter
+        elif EK in (Qt.Key_Return, Qt.Key_Enter):
             self.ConfirmOk()
         elif EK == Qt.Key_Escape:
             self.CloseDialog()
@@ -1158,6 +1187,7 @@ class TakeBallConfirmDialog(QtWidgets.QDialog):
         #     self.CloseDialog()
 
     def ConfirmOk(self):
+        self.Log.i(f"TakeBallConfirmDialog_ConfirmOk called, Lock={self.Lock}")
         if(self.Lock==False):
             self.Lock = True
             self.tmpHttpR.SendTakeBallConfirmCmd('takeBall'+str(self.tmpHttpR.response_take), '1')
@@ -1188,7 +1218,7 @@ class TakeBallConfirmDialog(QtWidgets.QDialog):
 class ErrorDialog(QtWidgets.QDialog):
     def __init__(self, parent, ErrorTitle, ErrorMsg, tmplog):
         # === 初始化 Dialog 視窗，設定為無邊框全螢幕 ===
-        QtWidgets.QDialog.__init__(self, parent, QtCore.Qt.FramelessWindowHint)
+        QtWidgets.QDialog.__init__(self, parent, QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint)
         self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
         self.setCursor(QtGui.QCursor(QtCore.Qt.BlankCursor))
 
@@ -1278,14 +1308,14 @@ class ErrorDialog(QtWidgets.QDialog):
 # class SuccessDialog(QtWidgets.QDialog):
 #     def __init__(self, parent, httpR, tmplog, tmpBallControl):
 #         # 初始化無邊框全螢幕 Dialog
-#         QtWidgets.QDialog.__init__(self, parent, QtCore.Qt.FramelessWindowHint)
+#         QtWidgets.QDialog.__init__(self, parent, QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint)
 #         self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
 #         self.setCursor(QtGui.QCursor(QtCore.Qt.BlankCursor))
 #         self.setWindowTitle("")
 
 class SuccessDialog(QtWidgets.QDialog):
     def __init__(self, parent, httpR, tmplog, tmpBallControl):
-        super().__init__(parent, flags=QtCore.Qt.FramelessWindowHint)
+        super().__init__(parent, flags=QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint)
         self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
         self.setCursor(QtGui.QCursor(QtCore.Qt.BlankCursor))
 
