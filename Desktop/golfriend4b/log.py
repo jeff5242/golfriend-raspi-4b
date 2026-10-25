@@ -4,6 +4,7 @@ import platform
 import os
 import logging
 import json
+from logging.handlers import RotatingFileHandler
 import threading
 import time
 from queue import Queue, Empty
@@ -30,6 +31,13 @@ print("BASE_PATH:", BASE_PATH)
 print("DEVICE_PATH:", DEVICE_PATH)
 
 LOGTAIL_TOKEN_FILE = os.path.join(BASE_PATH, "logtail_token")
+
+# 本機檔案 log 放 /tmp：Pi 上 /tmp 是 tmpfs，斷電不會留下寫到一半的檔案，
+# 也不會磨損硬碟；歷史紀錄由 Logtail 保存，本機只留這次開機的除錯用。
+LOG_DIR = "/tmp"
+LOG_FILE = os.path.join(LOG_DIR, "golfTest.log")
+LOG_MAX_BYTES = 1 * 1024 * 1024   # 單檔 1MB
+LOG_BACKUP_COUNT = 2              # 最多保留 golfTest.log.1 / .2，合計約 3MB
 DEVICE_NAME_FILE = os.path.join(DEVICE_PATH, "DeviceName")
 
 # Log 分類標籤
@@ -45,6 +53,22 @@ def _read_file_strip(path):
             return f.readline().strip()
     except Exception:
         return ""
+
+
+def create_file_handler(path=LOG_FILE, max_bytes=LOG_MAX_BYTES, backup_count=LOG_BACKUP_COUNT):
+    """建立會自動輪替的檔案 handler；路徑不可寫時回傳 None，不中斷主程式"""
+    try:
+        handler = RotatingFileHandler(
+            path, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
+        )
+    except OSError as e:
+        print(f"File log disabled ({path}): {e}")
+        return None
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(
+        logging.Formatter('%(asctime)s %(levelname)s [%(tag)s] %(message)s')
+    )
+    return handler
 
 
 class LogtailHandler(logging.Handler):
@@ -126,6 +150,11 @@ class mLog:
                 print(f"Logtail enabled, device={device_name}")
             else:
                 print("No logtail_token found, logging to stdout only")
+
+            file_handler = create_file_handler()
+            if file_handler:
+                self.logger.addHandler(file_handler)
+                print(f"File log: {LOG_FILE}")
 
             console = logging.StreamHandler()
             console.setLevel(logging.DEBUG)
