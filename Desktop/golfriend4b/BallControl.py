@@ -63,7 +63,12 @@ class BallControl:
         try:
             GPIO.setmode(GPIO.BCM)
             GPIO.setwarnings(False)
-            GPIO.setup(self.OutputPinNum, GPIO.OUT)
+            # 一定要給 initial=LOW 並再明確輸出 0：
+            # Bookworm 的 RPi.GPIO 其實是 rpi-lgpio，setup(OUT) 沒給 initial 時
+            # 會「沿用腳位當下讀到的電位」。開機期間若馬達板把腳位拉成 HIGH，
+            # 程式一啟動就會把 HIGH 鎖住，馬達持續轉動（2026-10-25 鐵砧山開機自動出球）。
+            GPIO.setup(self.OutputPinNum, GPIO.OUT, initial=GPIO.LOW)
+            GPIO.output(self.OutputPinNum, 0)
             GPIO.setup(self.InputPinNum, GPIO.IN)
             self.Log.i('BallControl_Initial')
         except Exception as e:
