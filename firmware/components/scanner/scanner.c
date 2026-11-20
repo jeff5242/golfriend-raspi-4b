@@ -1,5 +1,6 @@
 #include "scanner.h"
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <string.h>
 
@@ -23,6 +24,7 @@ static scanner_line_cb_t s_on_line;
 static scanner_key_cb_t s_on_key;
 static void *s_ctx;
 static scanner_line_t s_line;
+static atomic_bool s_clear_requested;
 static uint8_t s_prev_keys[HID_KBD_KEY_SLOTS];
 static QueueHandle_t s_dev_queue;
 
@@ -33,8 +35,16 @@ typedef struct {
 
 /* ---- 字元 → 一行 ------------------------------------------------------ */
 
+void scanner_reset_line(void)
+{
+    atomic_store(&s_clear_requested, true);
+}
+
 static void feed_char(char c)
 {
+    if (atomic_exchange(&s_clear_requested, false)) {
+        scanner_line_clear(&s_line);
+    }
     const int64_t now = esp_timer_get_time();
     const bool printable = c >= 0x20 && c < 0x7F && c != '%';
     if (printable && now >= s_line.guard_until_us && s_on_key != NULL) {

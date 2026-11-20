@@ -20,6 +20,13 @@ void scanner_line_init(scanner_line_t *line)
     line->guard_until_us = 0;
 }
 
+void scanner_line_clear(scanner_line_t *line)
+{
+    if (line != NULL) {
+        reset_buffer(line);
+    }
+}
+
 bool scanner_line_feed(scanner_line_t *line, char c, int64_t now_us,
                        char *out, size_t out_size)
 {

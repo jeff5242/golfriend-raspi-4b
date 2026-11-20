@@ -36,6 +36,14 @@ static void test_failures_go_to_error_then_standby(void)
     CHECK(app_fsm_next(APP_ST_ERROR, APP_EV_ERROR_SHOWN) == APP_ST_STANDBY);
 }
 
+static void test_dispense_failure_goes_to_error(void)
+{
+    /* 審查 P1：出球失敗必須進錯誤畫面停 3 秒，不得直接回待機蓋掉錯誤訊息 */
+    CHECK(app_fsm_next(APP_ST_DISPENSE, APP_EV_DISPENSE_FAIL) == APP_ST_ERROR);
+    CHECK(app_fsm_next(APP_ST_DISPENSE, APP_EV_MOTOR_DONE) == APP_ST_STANDBY);
+    CHECK(app_fsm_next(APP_ST_STANDBY, APP_EV_DISPENSE_FAIL) == APP_ST_STANDBY);
+}
+
 static void test_input_ignored_while_busy(void)
 {
     /* 查詢、確認、出球中收到掃碼，不得開始第二筆交易 */
@@ -58,6 +66,7 @@ int main(void)
     RUN(test_scanner_line_from_standby_goes_to_query);
     RUN(test_input_timeout_returns_to_standby);
     RUN(test_failures_go_to_error_then_standby);
+    RUN(test_dispense_failure_goes_to_error);
     RUN(test_input_ignored_while_busy);
     RUN(test_state_names);
     return TEST_SUMMARY();

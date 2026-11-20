@@ -30,6 +30,9 @@ typedef struct {
 
 void scanner_line_init(scanner_line_t *line);
 
+/* 丟掉還沒結束的字元（回待機時呼叫）。1 秒按鍵保護照舊有效。 */
+void scanner_line_clear(scanner_line_t *line);
+
 /*
  * 送入一個字元。now_us 是單調遞增的時間（裝置上用 esp_timer_get_time()）。
  * 一行完成時，把內容（含結尾 '\0'）寫到 out 並回傳 true。

@@ -91,6 +91,45 @@ static void test_small_out_buffer_is_rejected(void)
     CHECK(!scanner_line_feed(&l, '\n', 1, out, sizeof out));
 }
 
+static void test_clear_drops_unfinished_input(void)
+{
+    /* 審查 P1：客人打了 "12" 沒按 Enter，逾時回待機後，下一位掃 "98765" 不得變成 "1298765" */
+    scanner_line_t l;
+    char out[SCANNER_LINE_MAX] = "";
+    scanner_line_init(&l);
+    CHECK(feed_all(&l, "12", 0, 1000, out) == 0);
+    scanner_line_clear(&l);
+    CHECK(feed_all(&l, "98765\n", 11 * 1000 * 1000, 1000, out) == 1);
+    CHECK_STR(out, "98765");
+}
+
+static void test_clear_keeps_key_guard(void)
+{
+    /* 清掉殘留字元不得順便取消 1 秒按鍵保護 */
+    scanner_line_t l;
+    char out[SCANNER_LINE_MAX] = "";
+    scanner_line_init(&l);
+    CHECK(feed_all(&l, "123\n", 0, 1000, out) == 1);
+    scanner_line_clear(&l);
+    CHECK(!scanner_line_feed(&l, '9', 500 * 1000, out, sizeof out));
+    CHECK(!scanner_line_feed(&l, '\n', 600 * 1000, out, sizeof out));
+    CHECK_STR(out, "123");
+}
+
+static void test_clear_resets_overflow(void)
+{
+    scanner_line_t l;
+    char out[SCANNER_LINE_MAX] = "";
+    char longline[SCANNER_LINE_MAX + 5];
+    memset(longline, '7', sizeof longline - 1);
+    longline[sizeof longline - 1] = '\0';
+    scanner_line_init(&l);
+    CHECK(feed_all(&l, longline, 0, 1000, out) == 0);
+    scanner_line_clear(&l);
+    CHECK(feed_all(&l, "55\n", 2 * 1000 * 1000, 1000, out) == 1);
+    CHECK_STR(out, "55");
+}
+
 int main(void)
 {
     RUN(test_enter_completes_line);
@@ -100,5 +139,8 @@ int main(void)
     RUN(test_input_after_guard_is_accepted);
     RUN(test_overflow_line_is_discarded);
     RUN(test_small_out_buffer_is_rejected);
+    RUN(test_clear_drops_unfinished_input);
+    RUN(test_clear_keeps_key_guard);
+    RUN(test_clear_resets_overflow);
     return TEST_SUMMARY();
 }

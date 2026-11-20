@@ -125,3 +125,8 @@ bool motor_is_running(void)
 {
     return s_running;
 }
+
+bool motor_is_ready(void)
+{
+    return s_gpio >= 0 && s_timer != NULL && !s_running;
+}

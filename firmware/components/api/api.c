@@ -62,7 +62,10 @@ static esp_err_t sha1_hex(const char *input, char out[41])
     return ESP_OK;
 }
 
-/* POST 表單，回應本文寫到 resp。後台用 200 和 400 都回 JSON（同 Pi 版判斷）。 */
+/*
+ * POST 表單，回應本文寫到 resp。後台用 200 和 400 都回 JSON（同 Pi 版判斷）。
+ * 不得回傳 ESP_FAIL：ESP_FAIL 只代表「後台回 error=true」，畫面依它決定要不要查錯誤代碼。
+ */
 static esp_err_t post_form(const char *path, const char *body, char *resp, size_t resp_size)
 {
     char url[API_URL_MAX];
@@ -82,10 +85,10 @@ static esp_err_t post_form(const char *path, const char *body, char *resp, size_
     const int body_len = (int)strlen(body);
     esp_err_t err = esp_http_client_open(client, body_len);
     if (err == ESP_OK && esp_http_client_write(client, body, body_len) != body_len) {
-        err = ESP_FAIL;
+        err = ESP_ERR_HTTP_WRITE_DATA;
     }
     if (err == ESP_OK && esp_http_client_fetch_headers(client) < 0) {
-        err = ESP_FAIL;
+        err = ESP_ERR_HTTP_FETCH_HEADER;
     }
     if (err == ESP_OK) {
         const int status = esp_http_client_get_status_code(client);
@@ -98,13 +101,17 @@ static esp_err_t post_form(const char *path, const char *body, char *resp, size_
         resp[total] = '\0';
         ESP_LOGI(TAG, "POST %s -> %d, %d bytes", path, status, total);
         if (status != 200 && status != 400) {
-            err = ESP_FAIL;
+            err = ESP_ERR_INVALID_RESPONSE;
         }
-    } else {
-        ESP_LOGE(TAG, "POST %s failed: %s", path, esp_err_to_name(err));
     }
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
+    if (err == ESP_FAIL) {
+        err = ESP_ERR_INVALID_RESPONSE;  /* 驅動內部回的 ESP_FAIL 也算網路錯誤 */
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "POST %s failed: %s", path, esp_err_to_name(err));
+    }
     return err;
 }
 

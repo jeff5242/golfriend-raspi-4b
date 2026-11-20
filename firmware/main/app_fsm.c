@@ -21,6 +21,7 @@ app_state_t app_fsm_next(app_state_t state, app_event_t event)
         break;
     case APP_ST_DISPENSE:
         if (event == APP_EV_MOTOR_DONE) return APP_ST_STANDBY;
+        if (event == APP_EV_DISPENSE_FAIL) return APP_ST_ERROR;
         break;
     case APP_ST_ERROR:
         if (event == APP_EV_ERROR_SHOWN) return APP_ST_STANDBY;

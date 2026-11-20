@@ -12,6 +12,7 @@
 
 #include "api.h"
 #include "api_errors.h"
+#include "app_dispense.h"
 #include "app_fsm.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -44,6 +45,7 @@ static app_state_t s_state = APP_ST_STANDBY;
 static char s_typed[SCANNER_LINE_MAX];
 static char s_code[SCANNER_LINE_MAX];
 static api_take_ball_result_t s_result;
+static motor_plan_t s_plan;
 static char s_error[ERROR_TEXT_MAX];
 
 /* ---- 回呼：只丟佇列，不做事 ------------------------------------------- */
@@ -97,6 +99,28 @@ static void set_error(const char *text)
     strlcpy(s_error, text, sizeof s_error);
 }
 
+/* 送確認（扣點）之前先算好時序、確認馬達可用。出不了球就不扣點。 */
+static bool prepare_dispense(void)
+{
+    const motor_params_t params = {
+        .type = s_result.type,
+        .take = s_result.take,
+        .timer_s = s_result.timer_s,
+        .start_timer_s = s_result.start_timer_s,
+        .interval_timer_s = s_result.interval_timer_s,
+        .ball_per_plate = s_result.ball_per_plate,
+    };
+    const app_dispense_check_t check = app_dispense_prepare(&params, motor_is_ready(), &s_plan);
+    if (check == APP_DISPENSE_OK) {
+        return true;
+    }
+    ESP_LOGE(TAG, "not confirming id=%s: check=%d type=%d take=%d", s_result.id, (int)check,
+             s_result.type, s_result.take);
+    set_error(check == APP_DISPENSE_MOTOR_NOT_READY ? "出球機未就緒，請洽櫃台"
+                                                    : "出球設定錯誤，請洽櫃台");
+    return false;
+}
+
 static app_event_t do_query(void)
 {
     if (!wifi_mgr_is_connected()) {
@@ -108,9 +132,9 @@ static app_event_t do_query(void)
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "take_ball ok: id=%s take=%d type=%d", s_result.id, s_result.take,
                  s_result.type);
-        return APP_EV_API_OK;
+        return prepare_dispense() ? APP_EV_API_OK : APP_EV_API_FAIL;
     }
-    set_error(err == ESP_FAIL ? api_error_text(API_CMD_TAKE_BALL, code) : "網路異常，請稍後再試");
+    set_error(api_failure_text(API_CMD_TAKE_BALL, err == ESP_FAIL, code));
     return APP_EV_API_FAIL;
 }
 
@@ -124,32 +148,22 @@ static app_event_t do_confirm(void)
     if (err == ESP_OK) {
         return APP_EV_CONFIRM_OK;
     }
-    set_error(err == ESP_FAIL ? api_error_text(API_CMD_TAKE_BALL_CONFIRM, code)
-                              : "網路異常，請稍後再試");
+    set_error(api_failure_text(API_CMD_TAKE_BALL_CONFIRM, err == ESP_FAIL, code));
     return APP_EV_API_FAIL;
 }
 
-/* 回傳 true 表示馬達已開始跑，之後等 APP_EV_MOTOR_DONE */
+/* 回傳 true 表示馬達已開始跑，之後等 APP_EV_MOTOR_DONE。時序在 prepare_dispense() 算好。 */
 static bool do_dispense(void)
 {
-    const motor_params_t params = {
-        .type = s_result.type,
-        .take = s_result.take,
-        .timer_s = s_result.timer_s,
-        .start_timer_s = s_result.start_timer_s,
-        .interval_timer_s = s_result.interval_timer_s,
-        .ball_per_plate = s_result.ball_per_plate,
-    };
-    motor_plan_t plan;
-    const motor_plan_err_t plan_err = motor_plan_build(&params, &plan);
-    if (plan_err != MOTOR_PLAN_OK || motor_run(&plan, on_motor_done, NULL) != ESP_OK) {
-        /* 交易已確認但無法出球：記錄下來，畫面請客人洽櫃台 */
-        ESP_LOGE(TAG, "cannot dispense: plan_err=%d type=%d take=%d id=%s", (int)plan_err,
-                 s_result.type, s_result.take, s_result.id);
-        ui_show_error("出球設定錯誤，請洽櫃台");
+    const esp_err_t err = motor_run(&s_plan, on_motor_done, NULL);
+    if (err != ESP_OK) {
+        /* 交易已確認但無法出球：記錄交易編號，畫面請客人洽櫃台 */
+        ESP_LOGE(TAG, "cannot dispense: %s id=%s take=%d", esp_err_to_name(err), s_result.id,
+                 s_result.take);
+        set_error("出球失敗，請洽櫃台");
         return false;
     }
-    ui_show_dispensing(0, plan.pulses);  /* TODO：motor 每盤完成時回報進度 */
+    ui_show_dispensing(0, s_plan.pulses);  /* TODO：motor 每盤完成時回報進度 */
     return true;
 }
 
@@ -160,6 +174,7 @@ static bool enter_state(app_state_t state, app_event_t *follow)
     case APP_ST_STANDBY:
         s_typed[0] = '\0';
         s_code[0] = '\0';
+        scanner_reset_line();  /* 上一位沒打完的字不得接到下一筆碼前面 */
         ui_show_standby();
         return false;
     case APP_ST_INPUT:
@@ -175,7 +190,7 @@ static bool enter_state(app_state_t state, app_event_t *follow)
         return true;
     case APP_ST_DISPENSE:
         if (!do_dispense()) {
-            *follow = APP_EV_MOTOR_DONE;
+            *follow = APP_EV_DISPENSE_FAIL;
             return true;
         }
         return false;

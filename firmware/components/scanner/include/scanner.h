@@ -27,6 +27,12 @@ typedef void (*scanner_key_cb_t)(char c, void *ctx);
 /* 安裝 USB Host 與 HID 驅動，開始接收輸入。 */
 esp_err_t scanner_start(scanner_line_cb_t on_line, scanner_key_cb_t on_key, void *ctx);
 
+/*
+ * 丟掉還沒結束的輸入（回待機時呼叫）。可以從任何工作呼叫：
+ * 只設旗標，USB 工作收到下一個字元前才真的清掉，不必上鎖。
+ */
+void scanner_reset_line(void);
+
 /* 處理一份 HID 開機協定鍵盤報告（8 bytes）。USB 回呼會呼叫；也方便測試。 */
 void scanner_handle_keyboard_report(const uint8_t *report, size_t len);
 

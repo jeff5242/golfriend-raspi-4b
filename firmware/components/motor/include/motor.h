@@ -25,6 +25,9 @@ void motor_stop(void);
 
 bool motor_is_running(void);
 
+/* 已初始化且沒在跑時回傳 true。送確認（扣點）前用來確認出得了球。 */
+bool motor_is_ready(void);
+
 #ifdef __cplusplus
 }
 #endif

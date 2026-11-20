@@ -7,6 +7,7 @@
  *   待機 --整行（掃碼器一次送完）--> 查詢
  *   輸入 --10 秒逾時--> 待機
  *   查詢／確認 --失敗或逾時--> 錯誤 --顯示完--> 待機
+ *   出球 --馬達無法啟動--> 錯誤
  */
 
 #ifdef __cplusplus
@@ -31,6 +32,7 @@ typedef enum {
     APP_EV_CONFIRM_OK,   /* take_ball_confirm 成功 */
     APP_EV_MOTOR_DONE,   /* 馬達時序跑完 */
     APP_EV_ERROR_SHOWN,  /* 錯誤畫面顯示完畢 */
+    APP_EV_DISPENSE_FAIL, /* 已確認但馬達無法啟動 */
 } app_event_t;
 
 /* 回傳下一個狀態。沒有定義的組合維持原狀態。 */

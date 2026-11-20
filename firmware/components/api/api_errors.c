@@ -29,6 +29,7 @@ static const error_entry_t CONFIRM_ERRORS[] = {
 };
 
 #define UNKNOWN_ERROR "Unknow Error"
+#define NETWORK_ERROR "網路異常，請稍後再試"
 #define COUNT_OF(a) (sizeof(a) / sizeof((a)[0]))
 
 static const char *lookup(const error_entry_t *table, size_t n, const char *code)
@@ -53,4 +54,9 @@ const char *api_error_text(api_cmd_t cmd, const char *code)
         return lookup(CONFIRM_ERRORS, COUNT_OF(CONFIRM_ERRORS), code);
     }
     return UNKNOWN_ERROR;
+}
+
+const char *api_failure_text(api_cmd_t cmd, bool server_rejected, const char *code)
+{
+    return server_rejected ? api_error_text(cmd, code) : NETWORK_ERROR;
 }
