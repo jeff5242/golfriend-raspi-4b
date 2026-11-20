@@ -1,0 +1,32 @@
+menu "Golfriend Ball Dispenser"
+
+    config GOLF_DEVICE_CODE
+        string "Device code (same as Pi Desktop/DeviceName, e.g. TGSGF_1F_M1)"
+        default ""
+
+    config GOLF_API_BASE_URL
+        string "API base URL"
+        default "http://golfpoint.milkidea.com/api"
+
+    config GOLF_MOTOR_GPIO
+        int "Relay signal GPIO (-1 = not set; must not be a strapping pin)"
+        range -1 54
+        default -1
+
+    config GOLF_WIFI1_SSID
+        string "WiFi 1 SSID (primary)"
+        default ""
+
+    config GOLF_WIFI1_PASSWORD
+        string "WiFi 1 password"
+        default ""
+
+    config GOLF_WIFI2_SSID
+        string "WiFi 2 SSID (backup, optional)"
+        default ""
+
+    config GOLF_WIFI2_PASSWORD
+        string "WiFi 2 password"
+        default ""
+
+endmenu

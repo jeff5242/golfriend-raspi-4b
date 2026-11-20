@@ -1,0 +1,4 @@
+## 版本先不鎖；第一次 idf.py build 成功後，dependencies.lock 會記下實際版本，必須一起 commit。
+## 序列埠模式的讀卡機之後再加：espressif/usb_host_cdc_acm 或 espressif/usb_host_ch34x_vcp
+dependencies:
+  espressif/usb_host_hid: "*"

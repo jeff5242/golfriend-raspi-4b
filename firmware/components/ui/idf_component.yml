@@ -1,0 +1,4 @@
+## 板子型號確認、要接 BSP 時再打開。版本在第一次建置成功後由 dependencies.lock 固定。
+dependencies: {}
+#  lvgl/lvgl: "*"
+#  espressif/esp_lvgl_port: "*"

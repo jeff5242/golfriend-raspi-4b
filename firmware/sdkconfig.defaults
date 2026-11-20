@@ -1,0 +1,14 @@
+# 不得在這個檔案寫 WiFi 密碼或裝置代碼；那些值用 idf.py menuconfig 設定，存在 sdkconfig（不進 git）。
+CONFIG_IDF_TARGET="esp32p4"
+
+# 1 ms tick，馬達時序與逾時才準
+CONFIG_FREERTOS_HZ=1000
+
+# 板子：16 MB Flash（商品頁）、32 MB PSRAM（晶片內建）
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_SPIRAM=y
+
+# 原型先用單一大 app 分割；加 OTA 時改成雙 app 分割表
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

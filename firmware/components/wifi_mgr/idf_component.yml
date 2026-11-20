@@ -1,0 +1,6 @@
+## ESP32-P4 沒有 WiFi，透過板上的 ESP32-C6 連線。
+## 版本先不鎖；第一次 idf.py build 成功後，dependencies.lock 會記下實際版本，必須一起 commit。
+## C6 端的 esp_hosted 韌體版本必須和這裡相容，見 firmware/README.md。
+dependencies:
+  espressif/esp_wifi_remote: "*"
+  espressif/esp_hosted: "*"
