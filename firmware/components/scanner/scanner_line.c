@@ -18,13 +18,20 @@ void scanner_line_init(scanner_line_t *line)
 {
     reset_buffer(line);
     line->guard_until_us = 0;
+    line->last_char_us = 0;
 }
 
-void scanner_line_clear(scanner_line_t *line)
+bool scanner_line_clear_stale(scanner_line_t *line, int64_t now_us)
 {
-    if (line != NULL) {
-        reset_buffer(line);
+    if (line == NULL) {
+        return false;
     }
+    const bool empty = line->len == 0 && !line->overflow;
+    if (!empty && now_us - line->last_char_us < SCANNER_IDLE_CLEAR_US) {
+        return false;  /* 還在連續送字：是正在掃的碼，不是殘字 */
+    }
+    reset_buffer(line);
+    return true;
 }
 
 bool scanner_line_feed(scanner_line_t *line, char c, int64_t now_us,
@@ -38,6 +45,7 @@ bool scanner_line_feed(scanner_line_t *line, char c, int64_t now_us,
     }
 
     if (!is_terminator(c)) {
+        line->last_char_us = now_us;
         if (line->len >= SCANNER_LINE_MAX - 1) {
             line->overflow = true;  /* 整行作廢，等結束字元再重來 */
         } else {

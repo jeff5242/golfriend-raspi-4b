@@ -29,12 +29,16 @@ esp_err_t scanner_start(scanner_line_cb_t on_line, scanner_key_cb_t on_key, void
 
 /*
  * 丟掉還沒結束的輸入（回待機時呼叫）。可以從任何工作呼叫：
- * 只設旗標，USB 工作收到下一個字元前才真的清掉，不必上鎖。
+ * 只把計數加 1，各裝置收到下一個字元前才清；距最後一字未滿 200 ms
+ * （掃碼進行中）的不清。不必上鎖。
  */
 void scanner_reset_line(void);
 
-/* 處理一份 HID 開機協定鍵盤報告（8 bytes）。USB 回呼會呼叫；也方便測試。 */
-void scanner_handle_keyboard_report(const uint8_t *report, size_t len);
+/*
+ * 處理 device 送來的一份 HID 開機協定鍵盤報告（8 bytes）。
+ * 每台裝置的按鍵狀態與行緩衝分開存（scanner_devs.h）。只能從 USB HID 回呼工作呼叫。
+ */
+void scanner_handle_keyboard_report(const void *device, const uint8_t *report, size_t len);
 
 /* 處理序列埠讀卡機送來的位元組（預留給 CDC／CH34x 驅動）。 */
 void scanner_handle_serial_bytes(const uint8_t *data, size_t len);

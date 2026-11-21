@@ -7,7 +7,7 @@
  *   - index 0 是主要 SSID（例：golfriend），後面依序是備援（例：HUAWEI）。
  *   - 同一組連續失敗 max_fail 次後，換下一組；最後一組失敗後回到第 0 組。
  *   - 連上任何一組後，失敗次數歸零。
- *   - 連在備援上時，每 primary_retry_us 回頭試一次主要 SSID。
+ *   - 連在備援上時，每 primary_retry_us 掃描一次主要 SSID；看得到才斷線回去，看不到就留在備援。
  */
 #include <stdbool.h>
 #include <stdint.h>
@@ -37,6 +37,13 @@ void wifi_policy_on_connected(wifi_policy_t *p, int64_t now_us);
 
 /* 連在備援上、且已超過 primary_retry_us 時回傳 true，表示該回頭試主要 SSID。 */
 bool wifi_policy_should_retry_primary(const wifi_policy_t *p, int64_t now_us);
+
+/*
+ * should_retry_primary 為 true 時，先掃描主要 SSID，掃描完成後呼叫。
+ * 還連在備援上且看得到主要 SSID：選回主要 SSID，回傳 true，呼叫端才斷線重連。
+ * 看不到：留在備援，等下一個 primary_retry_us 再試，回傳 false。
+ */
+bool wifi_policy_on_primary_scan(wifi_policy_t *p, bool primary_seen, int64_t now_us);
 
 /* 回頭試主要 SSID 前呼叫：current 設回 0，失敗次數歸零。 */
 void wifi_policy_select_primary(wifi_policy_t *p);

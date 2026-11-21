@@ -98,7 +98,7 @@ static void test_clear_drops_unfinished_input(void)
     char out[SCANNER_LINE_MAX] = "";
     scanner_line_init(&l);
     CHECK(feed_all(&l, "12", 0, 1000, out) == 0);
-    scanner_line_clear(&l);
+    CHECK(scanner_line_clear_stale(&l, 11 * 1000 * 1000));
     CHECK(feed_all(&l, "98765\n", 11 * 1000 * 1000, 1000, out) == 1);
     CHECK_STR(out, "98765");
 }
@@ -110,7 +110,7 @@ static void test_clear_keeps_key_guard(void)
     char out[SCANNER_LINE_MAX] = "";
     scanner_line_init(&l);
     CHECK(feed_all(&l, "123\n", 0, 1000, out) == 1);
-    scanner_line_clear(&l);
+    scanner_line_clear_stale(&l, 400 * 1000);
     CHECK(!scanner_line_feed(&l, '9', 500 * 1000, out, sizeof out));
     CHECK(!scanner_line_feed(&l, '\n', 600 * 1000, out, sizeof out));
     CHECK_STR(out, "123");
@@ -125,9 +125,33 @@ static void test_clear_resets_overflow(void)
     longline[sizeof longline - 1] = '\0';
     scanner_line_init(&l);
     CHECK(feed_all(&l, longline, 0, 1000, out) == 0);
-    scanner_line_clear(&l);
+    CHECK(scanner_line_clear_stale(&l, 2 * 1000 * 1000));
     CHECK(feed_all(&l, "55\n", 2 * 1000 * 1000, 1000, out) == 1);
     CHECK_STR(out, "55");
+}
+
+static void test_clear_keeps_scan_in_progress(void)
+{
+    /* 審查 P2：下一位在出球結束那一刻掃碼，"987" 已進來時回待機，不得只剩 "65" */
+    scanner_line_t l;
+    char out[SCANNER_LINE_MAX] = "";
+    scanner_line_init(&l);
+    CHECK(feed_all(&l, "987", 0, 5000, out) == 0);          /* 0、5、10 ms */
+    CHECK(!scanner_line_clear_stale(&l, 15 * 1000));        /* 距最後一字 5 ms */
+    CHECK(feed_all(&l, "65\n", 15 * 1000, 5000, out) == 1);
+    CHECK_STR(out, "98765");
+}
+
+static void test_clear_stale_boundary(void)
+{
+    scanner_line_t l;
+    char out[SCANNER_LINE_MAX] = "";
+    scanner_line_init(&l);
+    CHECK(feed_all(&l, "12", 0, 1000, out) == 0);           /* 最後一字在 1 ms */
+    CHECK(!scanner_line_clear_stale(&l, 1000 + SCANNER_IDLE_CLEAR_US - 1));
+    CHECK(scanner_line_clear_stale(&l, 1000 + SCANNER_IDLE_CLEAR_US));
+    CHECK(feed_all(&l, "3\n", 2 * 1000 * 1000, 1000, out) == 1);
+    CHECK_STR(out, "3");
 }
 
 int main(void)
@@ -142,5 +166,7 @@ int main(void)
     RUN(test_clear_drops_unfinished_input);
     RUN(test_clear_keeps_key_guard);
     RUN(test_clear_resets_overflow);
+    RUN(test_clear_keeps_scan_in_progress);
+    RUN(test_clear_stale_boundary);
     return TEST_SUMMARY();
 }

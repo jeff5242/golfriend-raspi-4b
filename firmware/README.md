@@ -33,11 +33,13 @@ make -C firmware/test_host
 | 測試 | 對應 Pi 版行為 |
 |---|---|
 | `test_hid_keymap` | 掃碼器／鍵盤／讀卡機的 HID 鍵碼轉字元，含 Shift+5 = `%`、數字鍵盤 |
-| `test_scanner_line` | Enter／Tab／`%` 結束一行、1 秒按鍵保護、超長整行丟棄、回待機清掉沒打完的字 |
-| `test_motor_plan` | 計時模式 `ceil(take/5)*timer`；計盤模式盤數、通電、間隔（含鐵砧山設定） |
+| `test_scanner_line` | Enter／Tab／`%` 結束一行、1 秒按鍵保護、超長整行丟棄、回待機清掉沒打完的字（掃碼進行中的不清） |
+| `test_scanner_devs` | 經 USB Hub 同時接多台輸入裝置時，每台的按鍵狀態與沒打完的字分開存，拔掉一台只清那台 |
+| `test_motor_plan` | 計時模式 `ceil(take/5)*timer`；計盤模式盤數、通電、間隔（含鐵砧山設定）；擋下四捨五入成 0 ms、`inf`／`nan` |
+| `test_motor` | 用 `idf_stub/` 替身編譯 `motor.c`：計時器啟動失敗時腳位拉 LOW，並回報出球中斷 |
 | `test_api_sign` | 簽章字串串接順序、表單編碼與 Python `urlencode` 一致 |
 | `test_api_errors` | 後台錯誤代碼 → 中文訊息；網路錯誤不顯示 `Unknow Error` |
-| `test_wifi_policy` | 主要／備援 SSID 切換、回頭試主要 SSID |
+| `test_wifi_policy` | 主要／備援 SSID 切換；回頭試主要 SSID 前先掃描，看不到就留在備援 |
 | `test_app_fsm` | 出球流程狀態轉換、忙碌中不收第二筆 |
 | `test_app_dispense` | 送確認（扣點）前先檢查馬達與出球參數，出不了球就不扣點（Pi 版是先確認再出球） |
 
@@ -81,7 +83,7 @@ S 腳建議再加一顆 10 kΩ 下拉電阻到 GND，開機期間 GPIO 浮接時
 
 | 項目 | 狀態 |
 |---|---|
-| 純邏輯模組＋主機端測試 | 已完成，159 項檢查通過 |
+| 純邏輯模組＋主機端測試 | 已完成，265 項檢查通過 |
 | ESP-IDF 接線層（wifi_mgr、scanner、api、motor、app_main） | 已寫，**未用 `idf.py build` 編譯過** |
 | ui | 骨架，只印 log |
 | OTA、遠端 log、WiFi 設定頁 | 未開始 |

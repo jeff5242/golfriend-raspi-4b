@@ -60,3 +60,16 @@ void wifi_policy_select_primary(wifi_policy_t *p)
     p->fail_count = 0;
     p->connected = false;
 }
+
+bool wifi_policy_on_primary_scan(wifi_policy_t *p, bool primary_seen, int64_t now_us)
+{
+    if (p == NULL || !p->connected || p->current == 0) {
+        return false;  /* 掃描期間已斷線或已回到主要 SSID */
+    }
+    if (!primary_seen) {
+        p->connected_at_us = now_us;  /* 留在備援，primary_retry_us 後再試 */
+        return false;
+    }
+    wifi_policy_select_primary(p);
+    return true;
+}

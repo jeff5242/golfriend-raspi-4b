@@ -20,18 +20,24 @@ extern "C" {
 
 #define SCANNER_LINE_MAX 64
 #define SCANNER_GUARD_US (1000 * 1000)
+/* 距最後一個字元超過這段時間，才算沒打完的殘字。掃碼器送字間隔是毫秒級。 */
+#define SCANNER_IDLE_CLEAR_US (200 * 1000)
 
 typedef struct {
     char buf[SCANNER_LINE_MAX];
     size_t len;
     bool overflow;
     int64_t guard_until_us;
+    int64_t last_char_us;  /* 最後一個收進緩衝的字元時間 */
 } scanner_line_t;
 
 void scanner_line_init(scanner_line_t *line);
 
-/* 丟掉還沒結束的字元（回待機時呼叫）。1 秒按鍵保護照舊有效。 */
-void scanner_line_clear(scanner_line_t *line);
+/*
+ * 回待機時呼叫：距最後一個字元已達 SCANNER_IDLE_CLEAR_US，就丟掉還沒結束的字元，回傳 true。
+ * 還在連續送字（掃碼進行中）時保留，回傳 false。1 秒按鍵保護照舊有效。
+ */
+bool scanner_line_clear_stale(scanner_line_t *line, int64_t now_us);
 
 /*
  * 送入一個字元。now_us 是單調遞增的時間（裝置上用 esp_timer_get_time()）。

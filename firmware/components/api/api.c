@@ -35,10 +35,15 @@ esp_err_t api_init(const char *base_url, const char *device_code)
     return ESP_OK;
 }
 
-void api_time_sync_start(void)
+esp_err_t api_time_sync_start(void)
 {
     esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
-    esp_netif_sntp_init(&cfg);
+    const esp_err_t err = esp_netif_sntp_init(&cfg);
+    if (err != ESP_OK) {
+        /* 沒對時，簽章時間戳會錯，伺服器拒絕所有交易 */
+        ESP_LOGE(TAG, "esp_netif_sntp_init: %s", esp_err_to_name(err));
+    }
+    return err;
 }
 
 bool api_time_is_valid(void)

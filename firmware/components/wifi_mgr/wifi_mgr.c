@@ -30,6 +30,13 @@ static void *s_ctx;
 static esp_timer_handle_t s_reconnect_timer;
 static esp_timer_handle_t s_primary_timer;
 static volatile bool s_switching_to_primary;  /* 主動斷線去試主要 SSID，不算失敗 */
+static volatile bool s_scanning_primary;      /* 正在掃描主要 SSID 在不在 */
+
+static void schedule_reconnect(void)
+{
+    esp_timer_stop(s_reconnect_timer);
+    esp_timer_start_once(s_reconnect_timer, WIFI_RECONNECT_DELAY_US);
+}
 
 static void apply_and_connect(uint8_t index)
 {
@@ -38,7 +45,12 @@ static void apply_and_connect(uint8_t index)
     memcpy(cfg.sta.password, s_aps[index].password, sizeof cfg.sta.password);
     ESP_LOGI(TAG, "connecting to [%u] %s", (unsigned)index, s_aps[index].ssid);
     esp_wifi_set_config(WIFI_IF_STA, &cfg);
-    esp_wifi_connect();
+    const esp_err_t err = esp_wifi_connect();
+    if (err != ESP_OK) {
+        /* 不會有 DISCONNECTED 事件接手重試，必須自己排下一次 */
+        ESP_LOGW(TAG, "esp_wifi_connect: %s, retry later", esp_err_to_name(err));
+        schedule_reconnect();
+    }
 }
 
 static void on_reconnect_timer(void *arg)
@@ -47,14 +59,40 @@ static void on_reconnect_timer(void *arg)
     apply_and_connect(s_policy.current);
 }
 
+/* 連在備援夠久：先掃描主要 SSID，看得到才斷線回去，不讓備援白白斷線 */
 static void on_primary_timer(void *arg)
 {
     (void)arg;
-    if (wifi_policy_should_retry_primary(&s_policy, esp_timer_get_time())) {
-        ESP_LOGI(TAG, "on backup too long, retry primary");
-        wifi_policy_select_primary(&s_policy);
-        s_switching_to_primary = true;
-        esp_wifi_disconnect();  /* 觸發 DISCONNECTED → 重連到主要 SSID */
+    const int64_t now = esp_timer_get_time();
+    if (s_scanning_primary || !wifi_policy_should_retry_primary(&s_policy, now)) {
+        return;
+    }
+    wifi_scan_config_t scan = {.ssid = (uint8_t *)s_aps[0].ssid};
+    const esp_err_t err = esp_wifi_scan_start(&scan, false);  /* 結果在 WIFI_EVENT_SCAN_DONE */
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "scan for primary failed: %s", esp_err_to_name(err));
+        wifi_policy_on_primary_scan(&s_policy, false, now);
+        return;
+    }
+    s_scanning_primary = true;
+}
+
+static void on_primary_scan_done(const wifi_event_sta_scan_done_t *done)
+{
+    s_scanning_primary = false;
+    const bool seen = done != NULL && done->status == 0 && done->number > 0;
+    esp_wifi_clear_ap_list();  /* 釋放掃描結果 */
+    if (!wifi_policy_on_primary_scan(&s_policy, seen, esp_timer_get_time())) {
+        ESP_LOGI(TAG, "primary %s %s, stay on backup", s_aps[0].ssid,
+                 seen ? "seen but backup not connected" : "not found");
+        return;
+    }
+    ESP_LOGI(TAG, "primary %s found, switching back", s_aps[0].ssid);
+    s_switching_to_primary = true;
+    const esp_err_t err = esp_wifi_disconnect();  /* 觸發 DISCONNECTED → 重連到主要 SSID */
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wifi_disconnect: %s", esp_err_to_name(err));
+        s_switching_to_primary = false;
     }
 }
 
@@ -69,9 +107,12 @@ static void notify(bool connected)
 static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
-    (void)data;
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         apply_and_connect(s_policy.current);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
+        if (s_scanning_primary) {
+            on_primary_scan_done((const wifi_event_sta_scan_done_t *)data);
+        }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         const bool was_connected = s_connected;
         if (s_switching_to_primary) {
@@ -82,8 +123,7 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         if (was_connected) {
             notify(false);
         }
-        esp_timer_stop(s_reconnect_timer);
-        esp_timer_start_once(s_reconnect_timer, WIFI_RECONNECT_DELAY_US);
+        schedule_reconnect();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         wifi_policy_on_connected(&s_policy, esp_timer_get_time());
         ESP_LOGI(TAG, "got IP on [%u] %s", (unsigned)s_policy.current,

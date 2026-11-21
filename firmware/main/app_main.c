@@ -74,9 +74,13 @@ static void on_scanner_key(char c, void *ctx)
     post(APP_EV_KEY, s);
 }
 
-static void on_motor_done(void *ctx)
+static void on_motor_done(esp_err_t result, void *ctx)
 {
     (void)ctx;
+    if (result != ESP_OK) {
+        post(APP_EV_DISPENSE_FAIL, "出球中斷，請洽櫃台");  /* 交易已確認，球沒出完 */
+        return;
+    }
     post(APP_EV_MOTOR_DONE, NULL);
 }
 
@@ -86,8 +90,7 @@ static void on_wifi_status(bool connected, int ap_index, void *ctx)
     static bool sntp_started = false;
     ESP_LOGI(TAG, "wifi %s (ap %d)", connected ? "up" : "down", ap_index);
     if (connected && !sntp_started) {
-        api_time_sync_start();
-        sntp_started = true;
+        sntp_started = api_time_sync_start() == ESP_OK;  /* 失敗時下次連上再試 */
     }
     ui_set_wifi_status(connected, wifi_mgr_rssi());
 }
@@ -222,6 +225,10 @@ static void handle_event(app_event_t event, const app_msg_t *msg)
     for (;;) {
         if (msg != NULL) {
             record_input(msg);
+            if (msg->event == APP_EV_DISPENSE_FAIL && s_state == APP_ST_DISPENSE) {
+                ESP_LOGE(TAG, "dispense aborted id=%s take=%d", s_result.id, s_result.take);
+                set_error(msg->text);
+            }
         }
         const app_state_t next = app_fsm_next(s_state, event);
         if (next == s_state) {

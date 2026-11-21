@@ -30,8 +30,8 @@ typedef struct {
 /* base_url 例："http://golfpoint.milkidea.com/api"；device_code 對應 Pi 的 Desktop/DeviceName */
 esp_err_t api_init(const char *base_url, const char *device_code);
 
-/* 啟動 SNTP 對時。WiFi 拿到 IP 後呼叫一次即可。 */
-void api_time_sync_start(void);
+/* 啟動 SNTP 對時。WiFi 拿到 IP 後呼叫；回傳 ESP_OK 前，下次連上必須再呼叫。 */
+esp_err_t api_time_sync_start(void);
 
 /* 系統時間已經對過（年份 >= 2024）時回傳 true。 */
 bool api_time_is_valid(void);

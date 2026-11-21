@@ -65,6 +65,44 @@ static void test_select_primary_resets_state(void)
     CHECK(wifi_policy_on_fail(&p) == 1);
 }
 
+static void test_primary_not_seen_keeps_backup_and_waits(void)
+{
+    /* 審查 P2：主要 SSID 不在時，不得每 5 分鐘把備援斷掉 */
+    wifi_policy_t p;
+    wifi_policy_init(&p, 2, 1, 300 * SEC);
+    CHECK(wifi_policy_on_fail(&p) == 1);
+    wifi_policy_on_connected(&p, 0);
+    CHECK(wifi_policy_should_retry_primary(&p, 300 * SEC));
+    CHECK(!wifi_policy_on_primary_scan(&p, false, 300 * SEC));
+    CHECK(p.current == 1);
+    CHECK(p.connected);
+    CHECK(!wifi_policy_should_retry_primary(&p, 360 * SEC)); /* 下一次檢查不再立刻掃描 */
+    CHECK(wifi_policy_should_retry_primary(&p, 600 * SEC));
+}
+
+static void test_primary_seen_selects_primary(void)
+{
+    wifi_policy_t p;
+    wifi_policy_init(&p, 2, 1, 300 * SEC);
+    CHECK(wifi_policy_on_fail(&p) == 1);
+    wifi_policy_on_connected(&p, 0);
+    CHECK(wifi_policy_on_primary_scan(&p, true, 300 * SEC));
+    CHECK(p.current == 0);
+}
+
+static void test_scan_result_ignored_when_not_on_backup(void)
+{
+    /* 掃描期間已經斷線或已回到主要 SSID：結果不得改動狀態 */
+    wifi_policy_t p;
+    wifi_policy_init(&p, 2, 1, 300 * SEC);
+    wifi_policy_on_connected(&p, 0);
+    CHECK(!wifi_policy_on_primary_scan(&p, true, 300 * SEC));
+    CHECK(p.current == 0);
+    CHECK(wifi_policy_on_fail(&p) == 1);                      /* 備援，尚未連上 */
+    CHECK(!wifi_policy_on_primary_scan(&p, true, 300 * SEC));
+    CHECK(p.current == 1);
+}
+
 int main(void)
 {
     RUN(test_select_primary_resets_state);
@@ -73,5 +111,8 @@ int main(void)
     RUN(test_connected_resets_fail_count);
     RUN(test_retry_primary_only_when_on_backup_long_enough);
     RUN(test_single_ssid_never_switches);
+    RUN(test_primary_not_seen_keeps_backup_and_waits);
+    RUN(test_primary_seen_selects_primary);
+    RUN(test_scan_result_ignored_when_not_on_backup);
     return TEST_SUMMARY();
 }

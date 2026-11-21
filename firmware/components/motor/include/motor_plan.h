@@ -10,6 +10,7 @@
  *                   每盤通電 start_timer 秒，盤與盤之間斷電 interval_timer 秒
  *   其他 type（光感模式）原型不支援。
  */
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -44,6 +45,9 @@ typedef enum {
 } motor_plan_err_t;
 
 motor_plan_err_t motor_plan_build(const motor_params_t *params, motor_plan_t *out);
+
+/* 時序能不能交給 motor_run：至少通電一次、每次至少 1 ms。motor_run 用同一條規則。 */
+bool motor_plan_is_runnable(const motor_plan_t *plan);
 
 #ifdef __cplusplus
 }

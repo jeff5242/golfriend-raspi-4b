@@ -23,9 +23,30 @@ static void set_output(bool on)
     gpio_set_level(s_gpio, on ? 1 : 0);
 }
 
-static void schedule_ms(uint32_t ms)
+static esp_err_t schedule_ms(uint32_t ms)
 {
-    esp_timer_start_once(s_timer, (uint64_t)(ms == 0 ? 1 : ms) * 1000ULL);
+    return esp_timer_start_once(s_timer, (uint64_t)(ms == 0 ? 1 : ms) * 1000ULL);
+}
+
+/* 排程失敗時繼電器不得停在通電狀態：先拉 LOW 再結束 */
+static void abort_run(esp_err_t err)
+{
+    ESP_LOGE(TAG, "timer start failed after %u/%u pulses: %s", (unsigned)s_pulses_done,
+             (unsigned)s_plan.pulses, esp_err_to_name(err));
+    set_output(false);
+    s_running = false;
+}
+
+static void finish_run(esp_err_t result)
+{
+    if (result != ESP_OK) {
+        abort_run(result);
+    } else {
+        s_running = false;
+    }
+    if (s_on_done != NULL) {
+        s_on_done(result, s_ctx);
+    }
 }
 
 /* esp_timer 工作中執行：通電段結束 → 斷電；斷電段結束 → 下一盤通電 */
@@ -37,17 +58,20 @@ static void on_timer(void *arg)
         s_pulses_done++;
         ESP_LOGI(TAG, "pulse %u/%u done", (unsigned)s_pulses_done, (unsigned)s_plan.pulses);
         if (s_pulses_done >= s_plan.pulses) {
-            s_running = false;
-            if (s_on_done != NULL) {
-                s_on_done(s_ctx);
-            }
+            finish_run(ESP_OK);
             return;
         }
-        schedule_ms(s_plan.off_ms);
+        const esp_err_t err = schedule_ms(s_plan.off_ms);
+        if (err != ESP_OK) {
+            finish_run(err);
+        }
         return;
     }
     set_output(true);
-    schedule_ms(s_plan.on_ms);
+    const esp_err_t err = schedule_ms(s_plan.on_ms);
+    if (err != ESP_OK) {
+        finish_run(err);
+    }
 }
 
 esp_err_t motor_init(int gpio_num)
@@ -89,7 +113,7 @@ esp_err_t motor_init(int gpio_num)
 
 esp_err_t motor_run(const motor_plan_t *plan, motor_done_cb_t on_done, void *ctx)
 {
-    if (plan == NULL || plan->pulses == 0 || plan->on_ms == 0) {
+    if (!motor_plan_is_runnable(plan)) {
         return ESP_ERR_INVALID_ARG;
     }
     if (s_gpio < 0 || s_timer == NULL) {
@@ -106,7 +130,11 @@ esp_err_t motor_run(const motor_plan_t *plan, motor_done_cb_t on_done, void *ctx
     ESP_LOGI(TAG, "run: mode=%d pulses=%u on=%ums off=%ums", (int)plan->mode,
              (unsigned)plan->pulses, (unsigned)plan->on_ms, (unsigned)plan->off_ms);
     set_output(true);
-    schedule_ms(s_plan.on_ms);
+    const esp_err_t err = schedule_ms(s_plan.on_ms);
+    if (err != ESP_OK) {
+        abort_run(err);  /* 回傳值已經報錯，不呼叫 on_done */
+        return err;
+    }
     return ESP_OK;
 }
 
