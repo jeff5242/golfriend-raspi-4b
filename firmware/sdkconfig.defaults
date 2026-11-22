@@ -12,3 +12,13 @@ CONFIG_SPIRAM=y
 CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
 
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# WiFi 協處理器：板上 ESP32-C6，走 SDIO（esp_hosted 文件 esp32_p4_function_ev_board.md）
+# 2026-11-22 開機 log：Identified slave [esp32c6]、Reset slave using GPIO[54]，和 Function EV 板預設相同
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
+
+# 晶片版本：這批板子是 ESP32-P4 v1.3（2026-11-22 開機 log）。
+# ESP-IDF v5.5.6 預設只支援 v3.x，兩者硬體不相容；不設這行 esptool 會拒絕燒錄。
+# 之後買到 v3.x 晶片的板子時必須拿掉這行，不得用 --force。
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
