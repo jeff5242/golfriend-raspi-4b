@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 #include <time.h>
 
 #include "api_sign.h"
@@ -35,9 +36,20 @@ esp_err_t api_init(const char *base_url, const char *device_code)
     return ESP_OK;
 }
 
+/* SNTP 對時完成時呼叫（在 lwIP 工作中執行，只記 log） */
+static void on_time_synced(struct timeval *tv)
+{
+    struct tm tm_utc;
+    char text[24];
+    gmtime_r(&tv->tv_sec, &tm_utc);
+    strftime(text, sizeof text, "%Y-%m-%d %H:%M:%S", &tm_utc);
+    ESP_LOGI(TAG, "time synced: %s UTC", text);
+}
+
 esp_err_t api_time_sync_start(void)
 {
     esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    cfg.sync_cb = on_time_synced;
     const esp_err_t err = esp_netif_sntp_init(&cfg);
     if (err != ESP_OK) {
         /* 沒對時，簽章時間戳會錯，伺服器拒絕所有交易 */
