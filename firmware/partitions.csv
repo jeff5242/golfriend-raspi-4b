@@ -4,3 +4,5 @@
 nvs,      data, nvs,     0x9000,  0x6000
 phy_init, data, phy,     0xf000,  0x1000
 factory,  app,  factory, 0x10000, 0x600000
+# 各場館待機圖（TF 卡的 standby.jpg 匯入到這裡）。子類型 0x40 是自訂值。
+standby,  data, 0x40,    0x610000, 0x100000

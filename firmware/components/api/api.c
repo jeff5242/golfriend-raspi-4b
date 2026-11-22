@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/time.h>
 #include <time.h>
 
@@ -21,6 +22,7 @@ static const char *TAG = "api";
 #define API_RESP_MAX       2048
 #define API_SIGN_INPUT_MAX 256
 #define API_VALID_YEAR     2024
+#define API_DATE_MAX       40
 
 static char s_base_url[96];
 static char s_device_code[48];
@@ -79,6 +81,29 @@ static esp_err_t sha1_hex(const char *input, char out[41])
     return ESP_OK;
 }
 
+/* 記下回應的 Date 標頭（伺服器時間），用來比對板子的時鐘 */
+static esp_err_t on_http_event(esp_http_client_event_t *evt)
+{
+    if (evt->event_id == HTTP_EVENT_ON_HEADER && evt->user_data != NULL &&
+        strcasecmp(evt->header_key, "Date") == 0) {
+        snprintf((char *)evt->user_data, API_DATE_MAX, "%s", evt->header_value);
+    }
+    return ESP_OK;
+}
+
+/* 後台拒絕時印出完整回應與兩邊的時間：錯誤代碼 2（timeout）要靠這個判斷是不是時鐘問題 */
+static void log_rejection(const char *path, int status, const char *resp, const char *server_date)
+{
+    char device_date[API_DATE_MAX];
+    const time_t now = time(NULL);
+    struct tm tm_utc;
+    gmtime_r(&now, &tm_utc);
+    strftime(device_date, sizeof device_date, "%a, %d %b %Y %H:%M:%S GMT", &tm_utc);
+    ESP_LOGW(TAG, "%s rejected (%d): %s", path, status, resp);
+    ESP_LOGW(TAG, "  server time: %s", server_date[0] != '\0' ? server_date : "(no Date header)");
+    ESP_LOGW(TAG, "  device time: %s", device_date);
+}
+
 /*
  * POST 表單，回應本文寫到 resp。後台用 200 和 400 都回 JSON（同 Pi 版判斷）。
  * 不得回傳 ESP_FAIL：ESP_FAIL 只代表「後台回 error=true」，畫面依它決定要不要查錯誤代碼。
@@ -88,10 +113,13 @@ static esp_err_t post_form(const char *path, const char *body, char *resp, size_
     char url[API_URL_MAX];
     snprintf(url, sizeof url, "%s/%s", s_base_url, path);
 
+    char server_date[API_DATE_MAX] = "";
     const esp_http_client_config_t cfg = {
         .url = url,
         .method = HTTP_METHOD_POST,
         .timeout_ms = API_TIMEOUT_MS,
+        .event_handler = on_http_event,
+        .user_data = server_date,
     };
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (client == NULL) {
@@ -117,6 +145,9 @@ static esp_err_t post_form(const char *path, const char *body, char *resp, size_
         }
         resp[total] = '\0';
         ESP_LOGI(TAG, "POST %s -> %d, %d bytes", path, status, total);
+        if (status != 200) {
+            log_rejection(path, status, resp, server_date);
+        }
         if (status != 200 && status != 400) {
             err = ESP_ERR_INVALID_RESPONSE;
         }

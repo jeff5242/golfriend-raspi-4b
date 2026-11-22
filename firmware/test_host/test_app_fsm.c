@@ -71,6 +71,20 @@ static void test_touch_opens_input_only_from_standby(void)
     CHECK(app_fsm_next(APP_ST_ERROR, APP_EV_TOUCH) == APP_ST_ERROR);
 }
 
+static void test_maintenance_code_opens_menu(void)
+{
+    /* 維修碼只在待機與輸入時有效；選單關閉或逾時回待機 */
+    CHECK(app_fsm_next(APP_ST_STANDBY, APP_EV_MAINT) == APP_ST_MENU);
+    CHECK(app_fsm_next(APP_ST_INPUT, APP_EV_MAINT) == APP_ST_MENU);
+    CHECK(app_fsm_next(APP_ST_QUERY, APP_EV_MAINT) == APP_ST_QUERY);
+    CHECK(app_fsm_next(APP_ST_DISPENSE, APP_EV_MAINT) == APP_ST_DISPENSE);
+    CHECK(app_fsm_next(APP_ST_MENU, APP_EV_MENU_CLOSE) == APP_ST_STANDBY);
+    CHECK(app_fsm_next(APP_ST_MENU, APP_EV_TIMEOUT) == APP_ST_STANDBY);
+    CHECK(app_fsm_next(APP_ST_MENU, APP_EV_LINE) == APP_ST_MENU);  /* 選單中掃碼不領球 */
+    CHECK(app_fsm_next(APP_ST_MENU, APP_EV_KEY) == APP_ST_MENU);
+    CHECK_STR(app_fsm_state_name(APP_ST_MENU), "MENU");
+}
+
 int main(void)
 {
     RUN(test_happy_path_manual_input);
@@ -80,6 +94,7 @@ int main(void)
     RUN(test_dispense_failure_goes_to_error);
     RUN(test_input_ignored_while_busy);
     RUN(test_touch_opens_input_only_from_standby);
+    RUN(test_maintenance_code_opens_menu);
     RUN(test_state_names);
     return TEST_SUMMARY();
 }

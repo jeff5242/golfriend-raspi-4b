@@ -109,6 +109,7 @@ static void run_command(int c)
     case 'f': ui_show_confirm(50, 120, 70); break;
     case 'h': ui_show_confirm(50, 999999, 999999); break;
     case 'd': ui_show_dispensing(1, 3); break;
+    case 'm': ui_show_menu("裝置 TEST_0001\n版本 P4-0.1.0\n網路 有線\nIP 192.168.1.20"); break;
     case 'e': ui_show_error("領球碼過期，請重新產生"); break;
     default: return;  /* 換行與其他字元都略過 */
     }
@@ -119,7 +120,7 @@ static void run_command(int c)
 static void debug_task(void *arg)
 {
     (void)arg;
-    ESP_LOGW(TAG, "debug console on: c=capture s/i/q/f/h/d/e=demo screens");
+    ESP_LOGW(TAG, "debug console on: c=capture s/i/q/f/h/d/e/m=demo screens");
     for (;;) {
         /*
          * 直接讀 USB Serial/JTAG 的接收緩衝區：這個埠是第二主控台，只有輸出，getchar() 收不到。

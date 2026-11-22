@@ -5,6 +5,7 @@
 #include "driver/jpeg_decode.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "standby_store.h"
 #include "ui_board.h"
 
 static const char *TAG = "ui_image";
@@ -78,8 +79,17 @@ esp_err_t ui_image_load_standby(const lv_image_dsc_t **out)
     }
     uint8_t *pixels = NULL;
     uint32_t stride = 0;
-    const uint32_t jpg_size = (uint32_t)(standby_jpg_end - standby_jpg_start);
-    ESP_RETURN_ON_ERROR(decode(standby_jpg_start, jpg_size, &pixels, &stride), TAG, "standby image");
+    const uint8_t *jpg = NULL;
+    uint32_t jpg_size = 0;
+    const char *source = "venue image";
+    /* 先用現場匯入的圖；沒有、或解不開（尺寸不對、progressive JPEG）就用編進韌體的預設圖 */
+    if (standby_store_get(&jpg, &jpg_size) != ESP_OK ||
+        decode(jpg, jpg_size, &pixels, &stride) != ESP_OK) {
+        source = "built-in image";
+        jpg = standby_jpg_start;
+        jpg_size = (uint32_t)(standby_jpg_end - standby_jpg_start);
+        ESP_RETURN_ON_ERROR(decode(jpg, jpg_size, &pixels, &stride), TAG, "standby image");
+    }
 
     s_standby = (lv_image_dsc_t){
         .header = {
@@ -93,7 +103,6 @@ esp_err_t ui_image_load_standby(const lv_image_dsc_t **out)
         .data = pixels,
     };
     *out = &s_standby;
-    ESP_LOGI(TAG, "standby image decoded: %u bytes jpeg, center pixel 0x%04x", (unsigned)jpg_size,
-             (unsigned)*(const uint16_t *)(pixels + (size_t)stride * (UI_LCD_V_RES / 2 + 80) + UI_LCD_H_RES));
+    ESP_LOGI(TAG, "standby: %s, %u bytes jpeg", source, (unsigned)jpg_size);
     return ESP_OK;
 }

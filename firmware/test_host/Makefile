@@ -6,11 +6,12 @@ COMP    := ../components
 BIN     := bin
 
 INC := -I$(COMP)/scanner/include -I$(COMP)/motor/include -I$(COMP)/api/include \
-       -I$(COMP)/wifi_mgr/include -I../main
+       -I$(COMP)/wifi_mgr/include -I$(COMP)/settings/include -I$(COMP)/standby_store/include -I../main
 
 TESTS := test_hid_keymap test_scanner_line test_motor_plan test_api_sign \
          test_api_errors test_wifi_policy test_app_fsm test_app_dispense \
-         test_scanner_devs test_motor test_app_typed test_app_net
+         test_scanner_devs test_motor test_app_typed test_app_net \
+         test_settings_parse test_standby_header
 
 SRC_test_hid_keymap    := $(COMP)/scanner/hid_keymap.c
 SRC_test_scanner_line  := $(COMP)/scanner/scanner_line.c
@@ -19,6 +20,8 @@ SRC_test_api_sign      := $(COMP)/api/api_sign.c
 SRC_test_api_errors    := $(COMP)/api/api_errors.c
 SRC_test_wifi_policy   := $(COMP)/wifi_mgr/wifi_policy.c
 SRC_test_app_fsm       := ../main/app_fsm.c
+SRC_test_settings_parse := $(COMP)/settings/settings_parse.c
+SRC_test_standby_header := $(COMP)/standby_store/standby_header.c
 SRC_test_app_net       := ../main/app_net.c
 SRC_test_app_typed     := ../main/app_typed.c
 SRC_test_app_dispense  := ../main/app_dispense.c $(COMP)/motor/motor_plan.c

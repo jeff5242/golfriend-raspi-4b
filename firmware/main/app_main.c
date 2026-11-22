@@ -21,6 +21,7 @@
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_system.h"
 #include "eth_mgr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -29,6 +30,9 @@
 #include "motor_plan.h"
 #include "nvs_flash.h"
 #include "scanner.h"
+#include "settings.h"
+#include "standby_store.h"
+#include "tfcard.h"
 #include "sdkconfig.h"
 #include "ui.h"
 #include "wifi_mgr.h"
@@ -38,6 +42,14 @@ static const char *TAG = "app";
 #define INPUT_TIMEOUT_MS 10000  /* 同 Pi 版 TakeBallDialog 10 秒 */
 #define CONFIRM_DELAY_MS 2000   /* 同 Pi 版 QR 路徑 2 秒自動確認 */
 #define ERROR_SHOW_MS    3000
+#define MENU_TIMEOUT_MS   30000  /* 系統選單沒有操作 30 秒後回待機 */
+#define MAINT_CODE        "7777777"  /* 同 Pi 版的維修碼；Pi 版是關機，MCU 版開系統選單 */
+#define MENU_REBOOT_TEXT  "reboot"
+#define MENU_INFO_MAX     192
+#define CONFIG_FILE_PATH  TFCARD_MOUNT_POINT "/config.txt"
+#define STANDBY_FILE_PATH TFCARD_MOUNT_POINT "/standby.jpg"
+#define NOTICE_MAX        128
+#define NOTICE_SHOW_MS    3000
 #define APP_QUEUE_LEN    16
 #define ERROR_TEXT_MAX   64
 #define API_CODE_MAX     16
@@ -57,6 +69,7 @@ static char s_code[SCANNER_LINE_MAX];
 static api_take_ball_result_t s_result;
 static motor_plan_t s_plan;
 static char s_error[ERROR_TEXT_MAX];
+static settings_t s_settings;  /* 開機時讀一次；改設定後重開機生效 */
 
 /* ---- 回呼：只丟佇列，不做事 ------------------------------------------- */
 
@@ -94,6 +107,12 @@ static void on_ui_touch(void *ctx)
 static void on_ui_key(char c, void *ctx)
 {
     on_scanner_key(c, ctx);
+}
+
+static void on_ui_menu(ui_menu_action_t action, void *ctx)
+{
+    (void)ctx;
+    post(APP_EV_MENU_CLOSE, action == UI_MENU_REBOOT ? MENU_REBOOT_TEXT : NULL);
 }
 
 static void on_motor_done(esp_err_t result, void *ctx)
@@ -257,6 +276,18 @@ static bool do_dispense(void)
     return true;
 }
 
+static void show_menu(void)
+{
+    char ip[16] = "-";
+    char info[MENU_INFO_MAX];
+    const app_net_link_t link = active_link();
+    active_ip(ip, sizeof ip);
+    snprintf(info, sizeof info, "裝置 %s\n版本 %s\n網路 %s\nIP %s", s_settings.device_code,
+             esp_app_get_description()->version,
+             link == APP_NET_ETH ? "有線" : link == APP_NET_WIFI ? wifi_mgr_ssid() : "未連線", ip);
+    ui_show_menu(info);
+}
+
 /* 進入新狀態時執行。需要立刻接著處理的事件寫到 follow，回傳 true。 */
 static bool enter_state(app_state_t state, app_event_t *follow)
 {
@@ -287,11 +318,20 @@ static bool enter_state(app_state_t state, app_event_t *follow)
     case APP_ST_ERROR:
         ui_show_error(s_error);
         return false;
+    case APP_ST_MENU:
+        show_menu();
+        return false;
     }
     return false;
 }
 
 /* ---- 事件迴圈 ---------------------------------------------------------- */
+
+/* s_code 是維修碼時開系統選單，其他都當領球碼 */
+static app_event_t line_event(void)
+{
+    return strcmp(s_code, MAINT_CODE) == 0 ? APP_EV_MAINT : APP_EV_LINE;
+}
 
 /* 記下輸入，回傳實際要處理的事件：觸控鍵盤按「確認」時，按鍵事件變成整行事件。 */
 static app_event_t record_input(const app_msg_t *msg)
@@ -303,11 +343,11 @@ static app_event_t record_input(const app_msg_t *msg)
     if (msg->event == APP_EV_KEY) {
         if (app_typed_apply(s_typed, sizeof s_typed, msg->text[0])) {
             strlcpy(s_code, s_typed, sizeof s_code);
-            return APP_EV_LINE;
+            return line_event();
         }
     } else if (msg->event == APP_EV_LINE) {
-        /* TODO：維修碼（Pi 版 7777777 關機）在 MCU 上改成什麼動作，待決定 */
         strlcpy(s_code, msg->text, sizeof s_code);
+        return line_event();
     }
     return msg->event;
 }
@@ -317,6 +357,11 @@ static void handle_event(app_event_t event, const app_msg_t *msg)
     for (;;) {
         if (msg != NULL) {
             event = record_input(msg);
+            if (msg->event == APP_EV_MENU_CLOSE && s_state == APP_ST_MENU &&
+                strcmp(msg->text, MENU_REBOOT_TEXT) == 0) {
+                ESP_LOGW(TAG, "reboot from system menu");
+                esp_restart();
+            }
             if (msg->event == APP_EV_DISPENSE_FAIL && s_state == APP_ST_DISPENSE) {
                 ESP_LOGE(TAG, "dispense aborted id=%s take=%d", s_result.id, s_result.take);
                 set_error(msg->text);
@@ -343,6 +388,7 @@ static TickType_t state_timeout_ticks(app_state_t state)
     switch (state) {
     case APP_ST_INPUT: return pdMS_TO_TICKS(INPUT_TIMEOUT_MS);
     case APP_ST_ERROR: return pdMS_TO_TICKS(ERROR_SHOW_MS);
+    case APP_ST_MENU:  return pdMS_TO_TICKS(MENU_TIMEOUT_MS);
     default:           return portMAX_DELAY;
     }
 }
@@ -350,6 +396,36 @@ static TickType_t state_timeout_ticks(app_state_t state)
 static app_event_t timeout_event(app_state_t state)
 {
     return state == APP_ST_ERROR ? APP_EV_ERROR_SHOWN : APP_EV_TIMEOUT;
+}
+
+/*
+ * 開機時從 TF 卡匯入現場設定與待機圖。沒插卡、沒有檔案都不算錯誤。
+ * 必須在畫面、WiFi、API 啟動之前呼叫：匯入的內容這次開機就生效。
+ * 回傳要顯示給安裝人員看的訊息（沒有匯入任何東西時是空字串）。
+ */
+static void import_from_card(char *notice, size_t notice_size)
+{
+    notice[0] = '\0';
+    if (tfcard_mount() != ESP_OK) {
+        return;
+    }
+    const int applied = settings_import_file(CONFIG_FILE_PATH, &s_settings);
+    bool image_changed = false;
+    const esp_err_t image_err = standby_store_import_file(STANDBY_FILE_PATH, &image_changed);
+    tfcard_unmount();
+
+    int len = 0;
+    if (applied > 0) {
+        len += snprintf(notice + len, notice_size - len, "已匯入 %d 項設定\n", applied);
+    }
+    if (image_changed) {
+        len += snprintf(notice + len, notice_size - len, "待機圖已更新\n");
+    } else if (image_err != ESP_OK && image_err != ESP_ERR_NOT_FOUND) {
+        len += snprintf(notice + len, notice_size - len, "待機圖無法匯入\n");
+    }
+    if (len > 0) {
+        snprintf(notice + len, notice_size - len, "可以取出記憶卡");
+    }
 }
 
 static void init_nvs(void)
@@ -374,18 +450,27 @@ void app_main(void)
     tzset();
 
     init_nvs();
+    settings_load(&s_settings);
     s_queue = xQueueCreate(APP_QUEUE_LEN, sizeof(app_msg_t));
     configASSERT(s_queue != NULL);
 
+    char card_notice[NOTICE_MAX];
+    import_from_card(card_notice, sizeof card_notice);
+
     ESP_ERROR_CHECK(ui_init());
     ui_set_input_handlers(on_ui_touch, on_ui_key, NULL);
-    if (api_init(CONFIG_GOLF_API_BASE_URL, CONFIG_GOLF_DEVICE_CODE) != ESP_OK) {
+    ui_set_menu_handler(on_ui_menu, NULL);
+    if (card_notice[0] != '\0') {
+        ui_show_notice("記憶卡", card_notice);
+        vTaskDelay(pdMS_TO_TICKS(NOTICE_SHOW_MS));
+    }
+    if (api_init(CONFIG_GOLF_API_BASE_URL, s_settings.device_code) != ESP_OK) {
         ESP_LOGE(TAG, "api disabled");
     }
 
     const wifi_mgr_ap_t aps[] = {
-        {CONFIG_GOLF_WIFI1_SSID, CONFIG_GOLF_WIFI1_PASSWORD},
-        {CONFIG_GOLF_WIFI2_SSID, CONFIG_GOLF_WIFI2_PASSWORD},
+        {s_settings.wifi1_ssid, s_settings.wifi1_password},
+        {s_settings.wifi2_ssid, s_settings.wifi2_password},
     };
     if (wifi_mgr_start(aps, sizeof aps / sizeof aps[0], on_wifi_status, NULL) != ESP_OK) {
         ESP_LOGE(TAG, "wifi disabled");

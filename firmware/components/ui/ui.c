@@ -1,5 +1,6 @@
 #include "ui.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <time.h>
 
@@ -32,6 +33,12 @@ static const char *TAG = "ui";
 #define UI_PROGRESS_HEIGHT   28
 #define UI_CLOCK_PERIOD_MS   1000
 #define UI_CLOCK_VALID_YEAR  2024  /* 年份小於這個值：還沒對時 */
+#define UI_MENU_MESSAGE_Y    10   /* 選單的資訊有 4 行，位置比一般訊息低，避開標題 */
+#define UI_MENU_TITLE_Y      (-200)
+#define UI_MENU_KEY_WIDTH    300
+#define UI_MENU_KEY_HEIGHT   90
+#define UI_MENU_KEY_GAP      40
+#define UI_MENU_KEY_BOTTOM   (-36)
 #define UI_SSID_MAX          33  /* SSID 最長 32 bytes */
 
 typedef enum {
@@ -39,6 +46,7 @@ typedef enum {
     UI_VIEW_ERROR,     /* 同上，標題用紅色 */
     UI_VIEW_INPUT,     /* 輸入的字＋鍵盤 */
     UI_VIEW_STANDBY,   /* 待機圖（沒有圖時是標題＋訊息） */
+    UI_VIEW_MENU,      /* 系統選單：標題＋資訊＋兩顆鍵 */
 } ui_view_t;
 
 static bool s_ready;
@@ -48,6 +56,10 @@ static lv_obj_t *s_clock;     /* 左上角系統時間，永遠在最上層 */
 static lv_obj_t *s_net;       /* 右上角網路狀態，永遠在最上層 */
 static lv_obj_t *s_progress;  /* 出球進度條，只在出球畫面顯示 */
 static lv_obj_t *s_standby_image;  /* 沒有待機圖時是 NULL，待機畫面退回文字 */
+
+static lv_obj_t *s_menu_keys;      /* 系統選單的兩顆鍵 */
+static ui_menu_cb_t s_on_menu;
+static void *s_menu_ctx;
 
 static ui_touch_cb_t s_on_touch;
 static void *s_touch_ctx;
@@ -59,6 +71,48 @@ static void on_screen_clicked(lv_event_t *e)
     if (s_on_touch != NULL) {
         s_on_touch(s_touch_ctx);
     }
+}
+
+static void on_menu_key(lv_event_t *e)
+{
+    if (s_on_menu != NULL) {
+        s_on_menu((ui_menu_action_t)(uintptr_t)lv_event_get_user_data(e), s_menu_ctx);
+    }
+}
+
+static void add_menu_key(const char *text, ui_menu_action_t action, uint32_t bg, uint32_t bg_down,
+                         uint32_t fg)
+{
+    lv_obj_t *btn = lv_button_create(s_menu_keys);
+    lv_obj_remove_style_all(btn);
+    lv_obj_set_size(btn, UI_MENU_KEY_WIDTH, UI_MENU_KEY_HEIGHT);
+    lv_obj_set_style_radius(btn, UI_RADIUS_KEY, 0);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(bg), 0);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(bg_down), LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(btn, UI_KEY_BORDER_WIDTH, 0);
+    lv_obj_set_style_border_color(btn, lv_color_hex(fg), 0);
+    lv_obj_add_event_cb(btn, on_menu_key, LV_EVENT_CLICKED, (void *)(uintptr_t)action);
+
+    lv_obj_t *label = lv_label_create(btn);
+    lv_obj_set_style_text_font(label, &ui_font_tc_32, 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(fg), 0);
+    lv_label_set_text(label, text);
+    lv_obj_center(label);
+}
+
+static void build_menu_keys(lv_obj_t *scr)
+{
+    s_menu_keys = lv_obj_create(scr);
+    lv_obj_remove_style_all(s_menu_keys);
+    lv_obj_set_size(s_menu_keys, 2 * UI_MENU_KEY_WIDTH + UI_MENU_KEY_GAP, UI_MENU_KEY_HEIGHT);
+    lv_obj_align(s_menu_keys, LV_ALIGN_BOTTOM_MID, 0, UI_MENU_KEY_BOTTOM);
+    lv_obj_set_flex_flow(s_menu_keys, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(s_menu_keys, UI_MENU_KEY_GAP, 0);
+    add_menu_key("返回", UI_MENU_CLOSE, UI_COLOR_KEY, UI_COLOR_KEY_DOWN, UI_COLOR_TEXT);
+    add_menu_key("重新開機", UI_MENU_REBOOT, UI_COLOR_DELETE, UI_COLOR_DELETE_DOWN,
+                 UI_COLOR_DELETE_TEXT);
+    lv_obj_set_hidden(s_menu_keys, true);
 }
 
 /* 每秒更新左上角時間（LVGL 計時器，在 LVGL 工作中執行）。時區由 app_main 設定。 */
@@ -114,6 +168,7 @@ static void build_screen(void)
         ESP_LOGW(TAG, "standby image not available, using text");
     }
 
+    build_menu_keys(scr);
     ui_input_build(scr, NULL, NULL);
 
     /* 最後建立：蓋在待機圖與輸入畫面上面 */
@@ -146,6 +201,10 @@ static bool show_begin(ui_view_t view, const char *title, const char *message)
     lv_obj_set_style_text_color(
         s_title, lv_color_hex(view == UI_VIEW_ERROR ? UI_COLOR_ERROR : UI_COLOR_TEXT), 0);
     lv_obj_set_hidden(s_progress, true);
+    lv_obj_set_hidden(s_menu_keys, view != UI_VIEW_MENU);
+    lv_obj_align(s_title, LV_ALIGN_CENTER, 0, view == UI_VIEW_MENU ? UI_MENU_TITLE_Y : UI_TITLE_Y);
+    lv_obj_align(s_message, LV_ALIGN_CENTER, 0,
+                 view == UI_VIEW_MENU ? UI_MENU_MESSAGE_Y : UI_MESSAGE_Y);
     ui_input_set_visible(view == UI_VIEW_INPUT);
     if (s_standby_image != NULL) {
         lv_obj_set_hidden(s_standby_image, view != UI_VIEW_STANDBY);
@@ -277,6 +336,24 @@ void ui_show_dispensing(unsigned done, unsigned total)
         lv_obj_set_hidden(s_progress, false);
     }
     lvgl_port_unlock();
+}
+
+void ui_set_menu_handler(ui_menu_cb_t on_action, void *ctx)
+{
+    s_on_menu = on_action;
+    s_menu_ctx = ctx;
+}
+
+void ui_show_menu(const char *info)
+{
+    ESP_LOGI(TAG, "[menu]");
+    show(UI_VIEW_MENU, "系統選單", info != NULL ? info : "");
+}
+
+void ui_show_notice(const char *title, const char *message)
+{
+    ESP_LOGI(TAG, "[notice] %s", title != NULL ? title : "");
+    show(UI_VIEW_TEXT, title != NULL ? title : "", message != NULL ? message : "");
 }
 
 void ui_show_error(const char *message)

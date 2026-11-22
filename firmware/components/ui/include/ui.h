@@ -40,6 +40,20 @@ void ui_show_confirm(int take, long point_before, long point_after);
 /* 出球進度：第 done 盤 / 共 total 盤 */
 void ui_show_dispensing(unsigned done, unsigned total);
 
+/* 系統選單（維修用）：顯示 info（多行文字）與「返回」「重新開機」兩顆鍵 */
+typedef enum {
+    UI_MENU_CLOSE = 0,
+    UI_MENU_REBOOT,
+} ui_menu_action_t;
+typedef void (*ui_menu_cb_t)(ui_menu_action_t action, void *ctx);
+
+/* 回呼在 LVGL 工作中執行：只能丟佇列，不得阻塞。 */
+void ui_set_menu_handler(ui_menu_cb_t on_action, void *ctx);
+void ui_show_menu(const char *info);
+
+/* 一般通知：標題＋訊息（例如「設定已更新」） */
+void ui_show_notice(const char *title, const char *message);
+
 /* 錯誤訊息（中文） */
 void ui_show_error(const char *message);
 
