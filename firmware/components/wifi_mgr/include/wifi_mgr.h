@@ -32,6 +32,9 @@ bool wifi_mgr_is_connected(void);
 /* 目前連線的訊號強度（dBm）。沒連線時回傳 0。 */
 int wifi_mgr_rssi(void);
 
+/* 目前連線的 SSID。沒連線時回傳空字串。回傳的字串在程式執行期間一直有效。 */
+const char *wifi_mgr_ssid(void);
+
 #ifdef __cplusplus
 }
 #endif

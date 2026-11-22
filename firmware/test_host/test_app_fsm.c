@@ -60,6 +60,17 @@ static void test_state_names(void)
     CHECK_STR(app_fsm_state_name((app_state_t)99), "UNKNOWN");
 }
 
+static void test_touch_opens_input_only_from_standby(void)
+{
+    /* 點待機畫面：開啟觸控鍵盤（輸入狀態）。其他狀態點螢幕不得打斷流程 */
+    CHECK(app_fsm_next(APP_ST_STANDBY, APP_EV_TOUCH) == APP_ST_INPUT);
+    CHECK(app_fsm_next(APP_ST_INPUT, APP_EV_TOUCH) == APP_ST_INPUT);
+    CHECK(app_fsm_next(APP_ST_QUERY, APP_EV_TOUCH) == APP_ST_QUERY);
+    CHECK(app_fsm_next(APP_ST_CONFIRM, APP_EV_TOUCH) == APP_ST_CONFIRM);
+    CHECK(app_fsm_next(APP_ST_DISPENSE, APP_EV_TOUCH) == APP_ST_DISPENSE);
+    CHECK(app_fsm_next(APP_ST_ERROR, APP_EV_TOUCH) == APP_ST_ERROR);
+}
+
 int main(void)
 {
     RUN(test_happy_path_manual_input);
@@ -68,6 +79,7 @@ int main(void)
     RUN(test_failures_go_to_error_then_standby);
     RUN(test_dispense_failure_goes_to_error);
     RUN(test_input_ignored_while_busy);
+    RUN(test_touch_opens_input_only_from_standby);
     RUN(test_state_names);
     return TEST_SUMMARY();
 }

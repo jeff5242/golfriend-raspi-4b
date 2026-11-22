@@ -37,12 +37,46 @@ esptool 拒絕燒錄時（例：`requires chip revision in range ...`），不�
 |---|---|
 | 晶片 | `ESP-ROM:esp32p4-eco2`，chip revision v1.3（v3.x 的板子必須拿掉 `sdkconfig.defaults` 的 `CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y`） |
 | Flash／PSRAM | 16MB／32MB |
-| 螢幕／觸控 | EK79007 1024×600／GT911 |
+| 螢幕／觸控 | JD9165 1024×600／GT911（開機 log 寫 `Install EK79007`，那是 BSP 留下的字串，不是實際面板。見 4.2） |
 | C6 | `Identified slave [esp32c6]`，`Reset slave using GPIO[54]` |
 | C6 韌體版本 | 2.3.0（log 的 `Co-proc [x.y.z]`） |
 | 出廠程式 | `esp_brookesia_demo`，ESP-IDF v5.5.4 |
 
-不要接網路孔來開發：出廠程式不使用乙太網路，只會看到線路接通。
+不要用網路孔來燒錄：燒錄與 log 只走 USB。出廠程式不使用乙太網路；我們的程式會用（見 4.3）。
+
+### 1.1 板子介面（來源：賣場商品頁，2026-11-22 Jeff 提供截圖）
+
+型號：Guition JC1060P470C（7 吋 1024×600），核心模組 JC-ESP32P4-M3（ESP32-P4NRW32、32MB PSRAM、16MB Flash、ESP32-C6）。
+
+| 編號 | 介面 | 我們的用途／狀態 |
+|---|---|---|
+| 1 | BOOT 按鈕 | 救援燒錄時用 |
+| 2 | 重置按鈕 | 重開機 |
+| 3 | MX1.25 2P 喇叭 | 未使用 |
+| 4 | TF 卡座 | 未使用（之後可放各場館待機圖） |
+| 5 | MX1.25 2P 鋰電池 | 未使用 |
+| 6 | 電池按鈕 | 未使用 |
+| 7 | 全速 Type-C | USB Serial/JTAG：接電腦燒錄、看 log、抓畫面（已驗證） |
+| 8 | MX1.25 4P UART1 | 未使用（序列埠掃碼器可接這裡） |
+| 9 | 高速 Type-C | USB 2.0 OTG HS：接掃碼器、鍵盤、讀卡機（未驗證，需要 Type-C 轉 USB-A 母座；是否輸出 5V 未確認） |
+| 10 | MX1.25 4P UART0 | 主控台 UART（log 也從這裡輸出） |
+| 11 | MX1.25 4P RS485 | 未使用 |
+| 12 | SH1.0 4P I2C | 未使用 |
+| 13 | 百兆網路孔 | 有線網路（IP101，見 4.3） |
+| 14 | RTC 電池座 | 未使用 |
+| 15 | 30P 0.5 FPC MIPI | 螢幕排線 |
+| 16 | JC-ESP32P4-M3 | 核心模組 |
+| 17 | 6P 0.5 FPC | 觸控排線 |
+| 18 | 2×13 2.54 排針 | GPIO：之後接繼電器（腳位未決定） |
+
+- USB 裝置的限制（2026-11-22 實測）：
+  - 必須開 `CONFIG_USB_HOST_HUBS_SUPPORTED`，集線器後面的裝置才會被偵測（已寫進 `sdkconfig.defaults`）。
+  - 低速裝置（多數 USB 鍵盤）接在高速集線器後面不能用。log：`HUB: Connected device is LS, transaction translator (TT) is not supported`。這是 ESP-IDF USB Host 的限制。
+  - 對策：裝置用 Type-C 轉 USB-A 母座直接接高速 Type-C 孔（不經集線器）；或用序列埠掃碼器接 UART1。
+  - 全速裝置（多數掃碼器）接在高速集線器後面能不能用：未確認。
+- 板子沒有 USB-A 孔。兩個 Type-C 的分工：全速那個接電腦，高速那個接 USB 裝置。
+- 商品頁寫「內置 200 萬像素攝影機」：未確認。板上有 MIPI-CSI 介面；有沒有附鏡頭要看實物。相機掃 QR Code 的方案要先確認這一點。
+- 商品頁是機器翻譯，有錯字。廠商資料在螢幕型號與重置腳位上錯過（見 4.2），這張表沒實測的項目都算未確認。
 
 ## 2. 備份出廠程式（只讀取）
 
@@ -130,6 +164,39 @@ menuconfig 的項目都在「Golfriend Ball Dispenser」選單：
 常見的碼（`wifi_err_reason_t`）：8 = 自己離線、15 = 密碼錯（4-way handshake 逾時）、
 200 = beacon 逾時（基地台不見了）、201 = 找不到 AP。
 
+### 4.2 螢幕（2026-11-22 實測）
+
+出廠程式的 log 與廠商公開文件都不可信。下表的值是從出廠備份的程式碼讀出來的，並已在面板上驗證。
+
+| 項目 | 值 | 廠商資料的錯誤 |
+|---|---|---|
+| 面板驅動 | JD9165（`esp_lcd_new_panel_jd9165`） | 開機 log 寫 EK79007 |
+| 重置腳位 | GPIO0 | `board_pins.h` 寫 GPIO27 |
+| 初始化指令 | 60 筆，在 `components/ui/ui_panel_jd9165_cmds.h` | 公開的 `setup_device.c` 是給「LCD V1」的另一組，用了會出現灰白條紋 |
+| DSI | 2 lane、550 Mbps | — |
+| 像素時脈 | 52 MHz | — |
+| 水平時序 | 脈寬 24／後沿 136／前沿 160 | — |
+| 垂直時序 | 脈寬 2／後沿 21／前沿 12 | — |
+| 背光 | GPIO23，PWM 20 kHz | — |
+| 面板電源 | LDO 通道 3，2500 mV | — |
+
+- 重置腳位錯的時候，面板暫存器不會回到預設值。MCU 重開後，面板還留著上一版程式寫的設定。現象：底色偏藍或偏淡、文字上下有直條紋、畫面時有時無。面板斷電才會清掉。
+- 驗證重置腳位的方法：在某個暫存器寫入特別的值，拉低候選腳位，再讀回。值回到預設，就是正確的腳位。
+- 讀出廠設定的方法：解析備份檔的 app（位移 0x10000），用 `riscv32-esp-elf-objdump` 反組譯，找呼叫 `esp_lcd_new_panel_*` 的函式與它的參數表。
+- 新一批板子的面板不同時，必須重做這三步，不得直接沿用本表。
+
+抓畫面（開發用）：menuconfig 開 `GOLF_UI_DEBUG_CONSOLE`，執行 `python3 tools/ui_capture.py /dev/cu.usbmodem101 out.png [畫面字元]`。它讀畫面記憶體，約 2 秒一張，不會重置板子。它抓到的是程式畫的內容；面板的偏色、條紋抓不到，必須看實物。出貨韌體必須關閉這個選項。
+
+中文字型：只收錄字串用到的字。改了畫面上的中文字串後，執行 `python3 tools/gen_ui_font.py <NotoSansTC-Medium.ttf>`（字型從 Google Fonts 下載，OFL 授權）。`make -C test_host` 會檢查缺字。
+
+### 4.3 有線網路（2026-11-22）
+
+- 晶片：IP101（RMII）。腳位和 ESP-IDF 給 ESP32-P4 的預設值相同：MDC 31、MDIO 52、TX_EN 49、TXD0 34、TXD1 35、CRS_DV 28、RXD0 29、RXD1 30、時脈 GPIO50（外部輸入）、PHY 重置 GPIO51。
+- 已驗證：開機 log 出現 `ethernet attached to netif` 與 `eth_mgr: started`（驅動從 MDIO 讀到 IP101）。
+- 未驗證：插網路線後拿到 IP、有線優先、拔線後改走 WiFi。通過條件：log 出現 `eth_mgr: got ip`，狀態列顯示 `LAN`；拔線後狀態列回到 `WiFi`。
+- 規則：有線有 IP 就走有線（預設路由優先度 200，WiFi 100）。WiFi 同時保持連線當備援。
+- 沒插網路線時，開機多等約 4 秒（PHY 自動協商逾時）。
+
 ## 5. 升級 C6 韌體（不能保證還原，最後才做）
 
 ### 5.1 動手前的檢查表（全部打勾才做）
@@ -184,6 +251,7 @@ OTA 的保護與缺口：
 | 主機端測試跑到舊的執行檔 | Makefile 沒追蹤原始碼 | 已修（commit 3a14ae3） |
 | 硬碟只剩 12GB | — | 階段 3 註明所需空間 |
 | 第一次燒錄 esptool 拒絕：`requires chip revision in range v3.1 - v3.99 (this chip is revision v1.3)` | ESP-IDF v5.5.6 預設給 v3.x 晶片 | `sdkconfig.defaults` 加 `CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y`；規則：不得用 `--force` |
+| 螢幕有背光、畫面偏色有條紋 | 面板型號與重置腳位照 log 和廠商文件設定，兩者都錯 | 4.2：以出廠備份的程式碼為準 |
 | 燒完看不到 C6 | WiFi SSID 空白時程式不啟動 WiFi，C6 就不會初始化 | 階段 4 通過條件 |
 
 ## 7. 尚未確認

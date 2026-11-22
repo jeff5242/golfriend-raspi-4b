@@ -49,6 +49,12 @@ esp_err_t api_take_ball(const char *transaction_code, api_take_ball_result_t *ou
 esp_err_t api_take_ball_confirm(const char *response_id, const char *note, const char *status,
                                 char *err_msg, size_t err_size);
 
+/*
+ * 送 take_ball_ping（定期回報）。note 是「IP_版本」，同 Pi 版的 tmpIp + '_' + appVersion。
+ * 後台用這個請求更新裝置時間與上線狀態。回傳值規則同 api_take_ball。
+ */
+esp_err_t api_ping(const char *note, char *err_msg, size_t err_size);
+
 #ifdef __cplusplus
 }
 #endif

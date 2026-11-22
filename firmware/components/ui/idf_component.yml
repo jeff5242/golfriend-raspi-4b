@@ -1,8 +1,8 @@
 ## 螢幕：Guition JC1060P470（7 吋 1024x600 MIPI-DSI、GT911 觸控）。
-## 出廠程式用 EK79007 驅動（2026-11-22 開機 log：Install EK79007 LCD control panel），這裡沿用。
+## 面板晶片是 JD9165：出廠程式呼叫 esp_lcd_new_panel_jd9165()（開機 log 的 EK79007 字樣是 BSP 留下的）。
 ## 實際版本記在 dependencies.lock。
 dependencies:
   lvgl/lvgl: "^9.2.0"
   espressif/esp_lvgl_port: "^2.6.0"
-  espressif/esp_lcd_ek79007: ">=2.0.1,<3.0.0"
+  espressif/esp_lcd_jd9165: "^2.0.2"
   espressif/esp_lcd_touch_gt911: "^1.1.0"

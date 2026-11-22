@@ -1,62 +1,163 @@
 #include "ui.h"
 
 #include <stdio.h>
+#include <time.h>
 
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
 #include "ui_board.h"
+#include "ui_debug.h"
+#include "ui_image.h"
+#include "ui_input.h"
+#include "ui_theme.h"
 
 /*
- * 畫面第一版：一個標題、一行訊息、右上角 WiFi 狀態。先確認螢幕點得亮、流程看得到。
- * TODO（原型步驟 5）：
- *   1. 用 lv_font_conv 把畫面用到的中文字轉成字型（Noto Sans TC 子集）。
- *      在那之前畫面只顯示英數字；中文錯誤訊息只印在 log。
- *   2. 待機圖用 JPEG 放 Flash 或 TF 卡，以硬體 JPEG 解碼。
- *   3. 狀態列格式沿用 Pi 版：ping 固定 3 碼、IP 用十六進位、不加 "IP:"。
+ * 畫面：白底。一般畫面是標題＋訊息（出球時加進度條）；待機時整頁顯示待機圖；
+ * 輸入畫面在 ui_input.c。右上角是網路狀態。
+ * 改了畫面上的中文字串後必須重跑 tools/gen_ui_font.py。
+ * TODO：
+ *   1. 待機圖目前編進韌體（assets/standby.jpg）；各場館的圖之後改放 TF 卡或分割區。
+ *   2. 狀態列格式沿用 Pi 版：ping 固定 3 碼、IP 用十六進位、不加 "IP:"。
  */
 static const char *TAG = "ui";
 
 #define UI_BACKLIGHT_PERCENT 80
 #define UI_LOCK_TIMEOUT_MS   1000
+#define UI_POINT_HIDDEN      999999L  /* 同 api.h 的 API_POINT_HIDDEN：後台不公開點數 */
+#define UI_TITLE_Y           (-110)
+#define UI_MESSAGE_Y         20
+#define UI_PROGRESS_Y        130
+#define UI_PROGRESS_WIDTH    640
+#define UI_PROGRESS_HEIGHT   28
+#define UI_CLOCK_PERIOD_MS   1000
+#define UI_CLOCK_VALID_YEAR  2024  /* 年份小於這個值：還沒對時 */
+#define UI_SSID_MAX          33  /* SSID 最長 32 bytes */
+
+typedef enum {
+    UI_VIEW_TEXT = 0,  /* 標題＋訊息 */
+    UI_VIEW_ERROR,     /* 同上，標題用紅色 */
+    UI_VIEW_INPUT,     /* 輸入的字＋鍵盤 */
+    UI_VIEW_STANDBY,   /* 待機圖（沒有圖時是標題＋訊息） */
+} ui_view_t;
 
 static bool s_ready;
 static lv_obj_t *s_title;
 static lv_obj_t *s_message;
-static lv_obj_t *s_wifi;
+static lv_obj_t *s_clock;     /* 左上角系統時間，永遠在最上層 */
+static lv_obj_t *s_net;       /* 右上角網路狀態，永遠在最上層 */
+static lv_obj_t *s_progress;  /* 出球進度條，只在出球畫面顯示 */
+static lv_obj_t *s_standby_image;  /* 沒有待機圖時是 NULL，待機畫面退回文字 */
+
+static ui_touch_cb_t s_on_touch;
+static void *s_touch_ctx;
+
+/* 在 LVGL 工作中執行 */
+static void on_screen_clicked(lv_event_t *e)
+{
+    (void)e;
+    if (s_on_touch != NULL) {
+        s_on_touch(s_touch_ctx);
+    }
+}
+
+/* 每秒更新左上角時間（LVGL 計時器，在 LVGL 工作中執行）。時區由 app_main 設定。 */
+static void update_clock(lv_timer_t *timer)
+{
+    (void)timer;
+    const time_t now = time(NULL);
+    struct tm local;
+    localtime_r(&now, &local);
+    if (local.tm_year + 1900 < UI_CLOCK_VALID_YEAR) {
+        lv_label_set_text(s_clock, "----/--/-- --:--");  /* 還沒對時 */
+        return;
+    }
+    lv_label_set_text_fmt(s_clock, "%04d/%02d/%02d %02d:%02d", local.tm_year + 1900,
+                          local.tm_mon + 1, local.tm_mday, local.tm_hour, local.tm_min);
+}
 
 static void build_screen(void)
 {
     lv_obj_t *scr = lv_screen_active();
-    lv_obj_set_style_bg_color(scr, lv_color_hex(0x0B3D2E), 0);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(UI_COLOR_BG), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+    lv_obj_add_event_cb(scr, on_screen_clicked, LV_EVENT_CLICKED, NULL);  /* 沒有待機圖時點背景 */
 
     s_title = lv_label_create(scr);
-    lv_obj_set_style_text_font(s_title, &lv_font_montserrat_48, 0);
-    lv_obj_set_style_text_color(s_title, lv_color_white(), 0);
-    lv_obj_align(s_title, LV_ALIGN_CENTER, 0, -60);
+    lv_obj_set_style_text_font(s_title, &ui_font_tc_56, 0);
+    lv_obj_align(s_title, LV_ALIGN_CENTER, 0, UI_TITLE_Y);
 
     s_message = lv_label_create(scr);
-    lv_obj_set_style_text_font(s_message, &lv_font_montserrat_28, 0);
-    lv_obj_set_style_text_color(s_message, lv_color_hex(0xD8F3DC), 0);
-    lv_obj_align(s_message, LV_ALIGN_CENTER, 0, 30);
+    lv_obj_set_style_text_font(s_message, &ui_font_tc_32, 0);
+    lv_obj_set_style_text_color(s_message, lv_color_hex(UI_COLOR_TEXT_MUTED), 0);
+    lv_obj_set_style_text_align(s_message, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_line_space(s_message, 16, 0);
+    lv_obj_align(s_message, LV_ALIGN_CENTER, 0, UI_MESSAGE_Y);
 
-    s_wifi = lv_label_create(scr);
-    lv_obj_set_style_text_font(s_wifi, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(s_wifi, lv_color_white(), 0);
-    lv_obj_align(s_wifi, LV_ALIGN_TOP_RIGHT, -16, 12);
-    lv_label_set_text(s_wifi, "WiFi --");
+    s_progress = lv_bar_create(scr);
+    lv_obj_set_size(s_progress, UI_PROGRESS_WIDTH, UI_PROGRESS_HEIGHT);
+    lv_obj_align(s_progress, LV_ALIGN_CENTER, 0, UI_PROGRESS_Y);
+    lv_obj_set_style_bg_color(s_progress, lv_color_hex(UI_COLOR_LINE), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_progress, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_progress, lv_color_hex(UI_COLOR_ACCENT), LV_PART_INDICATOR);
+    lv_obj_set_hidden(s_progress, true);
+
+    const lv_image_dsc_t *standby = NULL;
+    if (ui_image_load_standby(&standby) == ESP_OK) {
+        s_standby_image = lv_image_create(scr);
+        lv_image_set_src(s_standby_image, standby);
+        lv_obj_align(s_standby_image, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_set_hidden(s_standby_image, true);
+        lv_obj_set_clickable(s_standby_image, true);
+        lv_obj_add_event_cb(s_standby_image, on_screen_clicked, LV_EVENT_CLICKED, NULL);
+    } else {
+        ESP_LOGW(TAG, "standby image not available, using text");
+    }
+
+    ui_input_build(scr, NULL, NULL);
+
+    /* 最後建立：蓋在待機圖與輸入畫面上面 */
+    s_net = lv_label_create(scr);
+    lv_obj_set_style_text_font(s_net, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(s_net, lv_color_hex(UI_COLOR_TEXT_MUTED), 0);
+    lv_obj_align(s_net, LV_ALIGN_TOP_RIGHT, -16, 12);
+    lv_label_set_text(s_net, "WiFi --");
+
+    s_clock = lv_label_create(scr);
+    lv_obj_set_style_text_font(s_clock, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(s_clock, lv_color_hex(UI_COLOR_TEXT_MUTED), 0);
+    lv_obj_align(s_clock, LV_ALIGN_TOP_LEFT, 16, 12);
+    update_clock(NULL);
+    lv_timer_create(update_clock, UI_CLOCK_PERIOD_MS, NULL);
 }
 
-/* 可以從任何工作呼叫；螢幕沒初始化成功時只略過 */
-static void show(const char *title, const char *message)
+/*
+ * 切換畫面。可以從任何工作呼叫；螢幕沒初始化成功時回傳 false。
+ * 回傳 true 時仍持有 lvgl_port_lock：呼叫端做完自己的調整後必須呼叫 lvgl_port_unlock()。
+ * 整個畫面的改動必須在同一次上鎖內完成，否則 LVGL 會先畫出改到一半的版面（畫面閃動）。
+ */
+static bool show_begin(ui_view_t view, const char *title, const char *message)
 {
     if (!s_ready || !lvgl_port_lock(UI_LOCK_TIMEOUT_MS)) {
-        return;
+        return false;
     }
     lv_label_set_text(s_title, title);
     lv_label_set_text(s_message, message);
-    lvgl_port_unlock();
+    lv_obj_set_style_text_color(
+        s_title, lv_color_hex(view == UI_VIEW_ERROR ? UI_COLOR_ERROR : UI_COLOR_TEXT), 0);
+    lv_obj_set_hidden(s_progress, true);
+    ui_input_set_visible(view == UI_VIEW_INPUT);
+    if (s_standby_image != NULL) {
+        lv_obj_set_hidden(s_standby_image, view != UI_VIEW_STANDBY);
+    }
+    return true;
+}
+
+static void show(ui_view_t view, const char *title, const char *message)
+{
+    if (show_begin(view, title, message)) {
+        lvgl_port_unlock();
+    }
 }
 
 esp_err_t ui_init(void)
@@ -79,19 +180,21 @@ esp_err_t ui_init(void)
     const lvgl_port_display_cfg_t disp_cfg = {
         .io_handle = board.io,
         .panel_handle = board.panel,
-        .buffer_size = UI_LCD_H_RES * 100,  /* 一次畫 100 行 */
-        .double_buffer = false,
+        .buffer_size = UI_LCD_H_RES * UI_LCD_V_RES,
+        .double_buffer = true,
         .hres = UI_LCD_H_RES,
         .vres = UI_LCD_V_RES,
         .color_format = LV_COLOR_FORMAT_RGB565,
-        .flags = {.buff_dma = true, .buff_spiram = true},
+        .flags = {.buff_dma = true, .buff_spiram = true, .full_refresh = true},
     };
-    const lvgl_port_display_dsi_cfg_t dsi_cfg = {.flags = {.avoid_tearing = false}};
+    /* 直接畫在面板的兩張畫面記憶體，整張畫完才在垂直同步時切換 */
+    const lvgl_port_display_dsi_cfg_t dsi_cfg = {.flags = {.avoid_tearing = true}};
     lv_display_t *disp = lvgl_port_add_disp_dsi(&disp_cfg, &dsi_cfg);
     if (disp == NULL) {
         ESP_LOGE(TAG, "lvgl_port_add_disp_dsi failed, running headless");
         return ESP_OK;
     }
+    ui_debug_start(board.panel);
     if (board.touch != NULL) {
         const lvgl_port_touch_cfg_t touch_cfg = {.disp = disp, .handle = board.touch};
         if (lvgl_port_add_touch(&touch_cfg) == NULL) {
@@ -109,56 +212,116 @@ esp_err_t ui_init(void)
     return ESP_OK;
 }
 
+void ui_set_input_handlers(ui_touch_cb_t on_touch, ui_keypad_cb_t on_key, void *ctx)
+{
+    s_on_touch = on_touch;
+    s_touch_ctx = ctx;
+    if (s_ready && lvgl_port_lock(UI_LOCK_TIMEOUT_MS)) {
+        ui_input_set_handler(on_key, ctx);
+        lvgl_port_unlock();
+    }
+}
+
 void ui_show_standby(void)
 {
     ESP_LOGI(TAG, "[standby]");
-    show("Golfriend", "Scan QR code or card");
+    show(UI_VIEW_STANDBY, "Golfriend", "請出示 QRCode 領球");  /* 沒有待機圖時顯示這兩行 */
 }
 
-void ui_show_input(const char *typed)
+void ui_show_input(const char *typed, uint32_t timeout_ms)
 {
     ESP_LOGI(TAG, "[input] %s", typed != NULL ? typed : "");
-    show("Code", typed != NULL ? typed : "");
+    if (show_begin(UI_VIEW_INPUT, "", "")) {
+        ui_input_set_text(typed != NULL ? typed : "");
+        ui_input_restart_countdown(timeout_ms);
+        lvgl_port_unlock();
+    }
 }
 
 void ui_show_querying(void)
 {
     ESP_LOGI(TAG, "[querying]");
-    show("Checking...", "");
+    show(UI_VIEW_TEXT, "查詢中", "請稍候");
 }
 
 void ui_show_confirm(int take, long point_before, long point_after)
 {
-    char text[64];
+    char text[96];
     ESP_LOGI(TAG, "[confirm] take=%d point %ld -> %ld", take, point_before, point_after);
-    snprintf(text, sizeof text, "%d balls   %ld -> %ld", take, point_before, point_after);
-    show("Confirm", text);
+    if (point_before == UI_POINT_HIDDEN || point_after == UI_POINT_HIDDEN) {
+        snprintf(text, sizeof text, "本次領球 %d 顆\n點數 ------", take);
+    } else {
+        snprintf(text, sizeof text, "本次領球 %d 顆\n點數 %ld → %ld", take, point_before,
+                 point_after);
+    }
+    show(UI_VIEW_TEXT, "領球確認", text);
 }
 
 void ui_show_dispensing(unsigned done, unsigned total)
 {
-    char text[32];
+    char text[64];
     ESP_LOGI(TAG, "[dispensing] %u/%u", done, total);
-    snprintf(text, sizeof text, "%u / %u", done, total);
-    show("Dispensing", text);
+    if (total == 0) {
+        text[0] = '\0';  /* 計時出球沒有盤數 */
+    } else if (done < total) {
+        snprintf(text, sizeof text, "第 %u 盤 / 共 %u 盤", done + 1, total);
+    } else {
+        snprintf(text, sizeof text, "全部完成，共 %u 盤", total);
+    }
+    if (!show_begin(UI_VIEW_TEXT, "出球中", text)) {
+        return;
+    }
+    if (total > 0) {
+        lv_bar_set_range(s_progress, 0, (int32_t)total);
+        lv_bar_set_value(s_progress, (int32_t)(done < total ? done : total), LV_ANIM_OFF);
+        lv_obj_set_hidden(s_progress, false);
+    }
+    lvgl_port_unlock();
 }
 
 void ui_show_error(const char *message)
 {
     ESP_LOGW(TAG, "[error] %s", message != NULL ? message : "");
-    show("Error", "Please contact staff");  /* 中文訊息要等字型做好，先看 log */
+    show(UI_VIEW_ERROR, "無法領球", message != NULL ? message : "");
 }
 
-void ui_set_wifi_status(bool connected, int rssi_dbm)
+static bool s_lan_up;
+static bool s_wifi_up;
+static int s_wifi_rssi;
+static char s_wifi_ssid[UI_SSID_MAX];
+
+/* 呼叫前必須已經拿到 lvgl_port_lock */
+static void refresh_net_label(void)
+{
+    if (s_lan_up) {
+        lv_label_set_text(s_net, "LAN");
+    } else if (s_wifi_up) {
+        lv_label_set_text_fmt(s_net, "%s %d", s_wifi_ssid, s_wifi_rssi);
+    } else {
+        lv_label_set_text(s_net, "WiFi --");
+    }
+}
+
+void ui_set_wifi_status(bool connected, const char *ssid, int rssi_dbm)
 {
     ESP_LOGI(TAG, "[wifi] %s %d dBm", connected ? "up" : "down", rssi_dbm);
     if (!s_ready || !lvgl_port_lock(UI_LOCK_TIMEOUT_MS)) {
         return;
     }
-    if (connected) {
-        lv_label_set_text_fmt(s_wifi, "WiFi %d dBm", rssi_dbm);
-    } else {
-        lv_label_set_text(s_wifi, "WiFi --");
+    s_wifi_up = connected;
+    s_wifi_rssi = rssi_dbm;
+    snprintf(s_wifi_ssid, sizeof s_wifi_ssid, "%s", ssid != NULL ? ssid : "");
+    refresh_net_label();
+    lvgl_port_unlock();
+}
+
+void ui_set_lan_status(bool connected)
+{
+    ESP_LOGI(TAG, "[lan] %s", connected ? "up" : "down");
+    if (!s_ready || !lvgl_port_lock(UI_LOCK_TIMEOUT_MS)) {
+        return;
     }
+    s_lan_up = connected;
+    refresh_net_label();
     lvgl_port_unlock();
 }

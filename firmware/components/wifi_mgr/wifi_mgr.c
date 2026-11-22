@@ -204,3 +204,12 @@ int wifi_mgr_rssi(void)
     }
     return info.rssi;
 }
+
+const char *wifi_mgr_ssid(void)
+{
+    const int index = s_policy.current;
+    if (!s_connected || index < 0 || index >= (int)s_ap_count) {
+        return "";
+    }
+    return s_aps[index].ssid;
+}

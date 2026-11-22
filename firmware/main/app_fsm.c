@@ -4,7 +4,7 @@ app_state_t app_fsm_next(app_state_t state, app_event_t event)
 {
     switch (state) {
     case APP_ST_STANDBY:
-        if (event == APP_EV_KEY) return APP_ST_INPUT;
+        if (event == APP_EV_KEY || event == APP_EV_TOUCH) return APP_ST_INPUT;
         if (event == APP_EV_LINE) return APP_ST_QUERY;
         break;
     case APP_ST_INPUT:

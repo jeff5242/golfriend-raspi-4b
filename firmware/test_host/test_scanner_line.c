@@ -154,6 +154,27 @@ static void test_clear_stale_boundary(void)
     CHECK_STR(out, "3");
 }
 
+static void test_backspace_removes_last_char(void)
+{
+    /* 觸控鍵盤的「刪除」鍵送 '\b'：刪掉最後一個字，空的時候不出錯 */
+    scanner_line_t l;
+    char out[SCANNER_LINE_MAX] = "";
+    scanner_line_init(&l);
+    CHECK(!scanner_line_feed(&l, '\b', 0, out, sizeof out));
+    CHECK(feed_all(&l, "129\b3\n", 1000, 1000, out) == 1);
+    CHECK_STR(out, "123");
+}
+
+static void test_backspace_does_not_end_line(void)
+{
+    scanner_line_t l;
+    char out[SCANNER_LINE_MAX] = "";
+    scanner_line_init(&l);
+    CHECK(feed_all(&l, "7\b\b\n", 0, 1000, out) == 0);   /* 刪光後按確認：空行不送出 */
+    CHECK(feed_all(&l, "45\n", 10000, 1000, out) == 1);
+    CHECK_STR(out, "45");
+}
+
 int main(void)
 {
     RUN(test_enter_completes_line);
@@ -168,5 +189,7 @@ int main(void)
     RUN(test_clear_resets_overflow);
     RUN(test_clear_keeps_scan_in_progress);
     RUN(test_clear_stale_boundary);
+    RUN(test_backspace_removes_last_char);
+    RUN(test_backspace_does_not_end_line);
     return TEST_SUMMARY();
 }

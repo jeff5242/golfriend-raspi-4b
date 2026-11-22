@@ -6,6 +6,7 @@
  * 對應 HttpCmdLibrary.py：
  *   take_ball         sn = sha1("salt" + time + transaction_code + device_code)
  *   take_ball_confirm sn = sha1("salt" + time + response_id)
+ *   take_ball_ping    sn = sha1("salt" + time + note + device_code)
  *   payload 用 requests.post(url, dict) 送出，也就是 application/x-www-form-urlencoded。
  */
 #include <stddef.h>

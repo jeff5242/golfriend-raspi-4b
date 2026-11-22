@@ -8,6 +8,11 @@ menu "Golfriend Ball Dispenser"
         string "API base URL"
         default "http://golfpoint.milkidea.com/api"
 
+    config GOLF_PING_INTERVAL_S
+        int "Status report (take_ball_ping) interval in seconds"
+        range 10 3600
+        default 60
+
     config GOLF_MOTOR_GPIO
         int "Relay signal GPIO (-1 = not set; must not be a strapping pin)"
         range -1 54
@@ -28,5 +33,9 @@ menu "Golfriend Ball Dispenser"
     config GOLF_WIFI2_PASSWORD
         string "WiFi 2 password"
         default ""
+
+    config GOLF_UI_DEBUG_CONSOLE
+        bool "UI debug console over serial (screen capture, demo screens). Must be off in production"
+        default n
 
 endmenu

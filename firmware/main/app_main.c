@@ -8,13 +8,20 @@
  * 由 app_main 的迴圈依序處理，狀態轉換規則在 app_fsm.c（有主機端測試）。
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "api.h"
 #include "api_errors.h"
 #include "app_dispense.h"
 #include "app_fsm.h"
+#include "app_net.h"
+#include "app_typed.h"
+#include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_netif.h"
+#include "eth_mgr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -34,6 +41,9 @@ static const char *TAG = "app";
 #define APP_QUEUE_LEN    16
 #define ERROR_TEXT_MAX   64
 #define API_CODE_MAX     16
+#define PING_NOTE_MAX    64
+#define PING_RETRY_MS    5000   /* 還沒有網路或還沒對時：稍後再試 */
+#define PING_TASK_STACK  6144
 
 typedef struct {
     app_event_t event;
@@ -74,6 +84,18 @@ static void on_scanner_key(char c, void *ctx)
     post(APP_EV_KEY, s);
 }
 
+/* 觸控回呼在 LVGL 工作中執行，同樣只丟佇列 */
+static void on_ui_touch(void *ctx)
+{
+    (void)ctx;
+    post(APP_EV_TOUCH, NULL);
+}
+
+static void on_ui_key(char c, void *ctx)
+{
+    on_scanner_key(c, ctx);
+}
+
 static void on_motor_done(esp_err_t result, void *ctx)
 {
     (void)ctx;
@@ -84,15 +106,76 @@ static void on_motor_done(esp_err_t result, void *ctx)
     post(APP_EV_MOTOR_DONE, NULL);
 }
 
+static app_net_link_t active_link(void)
+{
+    return app_net_active(eth_mgr_is_connected(), wifi_mgr_is_connected());
+}
+
+/* 有線或 WiFi 的連線狀態變了：第一次有網路時開始對時，更新狀態列 */
+static void on_net_changed(void)
+{
+    static bool sntp_started = false;
+    const app_net_link_t link = active_link();
+    if (link != APP_NET_NONE && !sntp_started) {
+        sntp_started = api_time_sync_start() == ESP_OK;  /* 失敗時下次連上再試 */
+    }
+    ui_set_lan_status(link == APP_NET_ETH);
+    ui_set_wifi_status(wifi_mgr_is_connected(), wifi_mgr_ssid(), wifi_mgr_rssi());
+}
+
 static void on_wifi_status(bool connected, int ap_index, void *ctx)
 {
     (void)ctx;
-    static bool sntp_started = false;
     ESP_LOGI(TAG, "wifi %s (ap %d)", connected ? "up" : "down", ap_index);
-    if (connected && !sntp_started) {
-        sntp_started = api_time_sync_start() == ESP_OK;  /* 失敗時下次連上再試 */
+    on_net_changed();
+}
+
+static void on_eth_status(bool connected, void *ctx)
+{
+    (void)ctx;
+    ESP_LOGI(TAG, "ethernet %s", connected ? "up" : "down");
+    on_net_changed();
+}
+
+/* ---- 定期回報 ---------------------------------------------------------- */
+
+/* 目前對外連線用的 IP（有線優先）。沒有網路時回傳 false。 */
+static bool active_ip(char *out, size_t out_size)
+{
+    esp_netif_ip_info_t info;
+    esp_netif_t *netif = esp_netif_get_default_netif();
+    if (netif == NULL || esp_netif_get_ip_info(netif, &info) != ESP_OK || info.ip.addr == 0) {
+        return false;
     }
-    ui_set_wifi_status(connected, wifi_mgr_rssi());
+    snprintf(out, out_size, IPSTR, IP2STR(&info.ip));
+    return true;
+}
+
+/*
+ * 定期送 take_ball_ping，後台用它更新裝置時間與上線狀態。
+ * 獨立工作：HTTP 最多等 10 秒，不得卡住領球流程。
+ * Pi 版 V2.6 的回報程式沒有被呼叫（舊版是每播完一段影片送一次），所以間隔由 menuconfig 決定。
+ */
+static void ping_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        char ip[16];
+        if (active_link() == APP_NET_NONE || !api_time_is_valid() || !active_ip(ip, sizeof ip)) {
+            vTaskDelay(pdMS_TO_TICKS(PING_RETRY_MS));
+            continue;
+        }
+        char note[PING_NOTE_MAX];
+        char code[API_CODE_MAX];
+        snprintf(note, sizeof note, "%s_%s", ip, esp_app_get_description()->version);
+        const esp_err_t err = api_ping(note, code, sizeof code);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "ping ok: %s", note);
+        } else {
+            ESP_LOGW(TAG, "ping failed: %s code=%s", esp_err_to_name(err), code);
+        }
+        vTaskDelay(pdMS_TO_TICKS(CONFIG_GOLF_PING_INTERVAL_S * 1000));
+    }
 }
 
 /* ---- 各狀態要做的事 ---------------------------------------------------- */
@@ -126,7 +209,7 @@ static bool prepare_dispense(void)
 
 static app_event_t do_query(void)
 {
-    if (!wifi_mgr_is_connected()) {
+    if (active_link() == APP_NET_NONE) {
         set_error("網路連接錯誤");
         return APP_EV_API_FAIL;
     }
@@ -185,7 +268,7 @@ static bool enter_state(app_state_t state, app_event_t *follow)
         ui_show_standby();
         return false;
     case APP_ST_INPUT:
-        ui_show_input(s_typed);
+        ui_show_input(s_typed, INPUT_TIMEOUT_MS);
         return false;
     case APP_ST_QUERY:
         ui_show_querying();
@@ -210,25 +293,30 @@ static bool enter_state(app_state_t state, app_event_t *follow)
 
 /* ---- 事件迴圈 ---------------------------------------------------------- */
 
-static void record_input(const app_msg_t *msg)
+/* 記下輸入，回傳實際要處理的事件：觸控鍵盤按「確認」時，按鍵事件變成整行事件。 */
+static app_event_t record_input(const app_msg_t *msg)
 {
     const bool accepting = s_state == APP_ST_STANDBY || s_state == APP_ST_INPUT;
     if (!accepting) {
-        return;
+        return msg->event;
     }
     if (msg->event == APP_EV_KEY) {
-        strlcat(s_typed, msg->text, sizeof s_typed);
+        if (app_typed_apply(s_typed, sizeof s_typed, msg->text[0])) {
+            strlcpy(s_code, s_typed, sizeof s_code);
+            return APP_EV_LINE;
+        }
     } else if (msg->event == APP_EV_LINE) {
         /* TODO：維修碼（Pi 版 7777777 關機）在 MCU 上改成什麼動作，待決定 */
         strlcpy(s_code, msg->text, sizeof s_code);
     }
+    return msg->event;
 }
 
 static void handle_event(app_event_t event, const app_msg_t *msg)
 {
     for (;;) {
         if (msg != NULL) {
-            record_input(msg);
+            event = record_input(msg);
             if (msg->event == APP_EV_DISPENSE_FAIL && s_state == APP_ST_DISPENSE) {
                 ESP_LOGE(TAG, "dispense aborted id=%s take=%d", s_result.id, s_result.take);
                 set_error(msg->text);
@@ -237,7 +325,7 @@ static void handle_event(app_event_t event, const app_msg_t *msg)
         const app_state_t next = app_fsm_next(s_state, event);
         if (next == s_state) {
             if (s_state == APP_ST_INPUT && event == APP_EV_KEY) {
-                ui_show_input(s_typed);
+                ui_show_input(s_typed, INPUT_TIMEOUT_MS);
             }
             return;
         }
@@ -281,11 +369,16 @@ void app_main(void)
         ESP_LOGE(TAG, "motor disabled");
     }
 
+    /* 台灣時間（UTC+8），給畫面時鐘用。API 簽章用的是 epoch 秒數，不受時區影響。 */
+    setenv("TZ", "CST-8", 1);
+    tzset();
+
     init_nvs();
     s_queue = xQueueCreate(APP_QUEUE_LEN, sizeof(app_msg_t));
     configASSERT(s_queue != NULL);
 
     ESP_ERROR_CHECK(ui_init());
+    ui_set_input_handlers(on_ui_touch, on_ui_key, NULL);
     if (api_init(CONFIG_GOLF_API_BASE_URL, CONFIG_GOLF_DEVICE_CODE) != ESP_OK) {
         ESP_LOGE(TAG, "api disabled");
     }
@@ -297,8 +390,16 @@ void app_main(void)
     if (wifi_mgr_start(aps, sizeof aps / sizeof aps[0], on_wifi_status, NULL) != ESP_OK) {
         ESP_LOGE(TAG, "wifi disabled");
     }
+    /* 有線網路：有接線就優先使用，沒接線不影響 WiFi */
+    if (eth_mgr_start(on_eth_status, NULL) != ESP_OK) {
+        ESP_LOGE(TAG, "ethernet disabled");
+    }
     if (scanner_start(on_scanner_line, on_scanner_key, NULL) != ESP_OK) {
         ESP_LOGE(TAG, "scanner disabled");
+    }
+
+    if (xTaskCreate(ping_task, "ping", PING_TASK_STACK, NULL, 3, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "status report disabled");
     }
 
     app_event_t unused;

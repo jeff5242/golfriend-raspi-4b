@@ -44,6 +44,15 @@ bool scanner_line_feed(scanner_line_t *line, char c, int64_t now_us,
         return false;
     }
 
+    if (c == '\b') {
+        /* 觸控鍵盤的「刪除」鍵：刪最後一個字。溢位的行已經作廢，不救回 */
+        line->last_char_us = now_us;
+        if (line->len > 0 && !line->overflow) {
+            line->buf[--line->len] = '\0';
+        }
+        return false;
+    }
+
     if (!is_terminator(c)) {
         line->last_char_us = now_us;
         if (line->len >= SCANNER_LINE_MAX - 1) {

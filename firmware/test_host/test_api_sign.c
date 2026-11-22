@@ -55,10 +55,19 @@ static void test_form_encode_rejects_small_buffer(void)
     CHECK(api_form_encode(out, sizeof out, keys, vals, 1) == -1);
 }
 
+static void test_ping_sign_input(void)
+{
+    /* 同 Pi 版 SendPingCmd："salt" + time + note + device_code */
+    char out[128];
+    CHECK(api_sign_input(out, sizeof out, "1700000000", "192.168.1.5_P4-0.1.0", "TEST_1") > 0);
+    CHECK_STR(out, "salt1700000000192.168.1.5_P4-0.1.0TEST_1");
+}
+
 int main(void)
 {
     RUN(test_take_ball_sign_input);
     RUN(test_confirm_sign_input_without_part2);
+    RUN(test_ping_sign_input);
     RUN(test_sign_input_rejects_small_buffer_and_null);
     RUN(test_form_encode_matches_python_requests);
     RUN(test_form_encode_escapes_like_python);

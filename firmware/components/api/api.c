@@ -287,3 +287,44 @@ esp_err_t api_take_ball_confirm(const char *response_id, const char *note, const
     free(resp);
     return err;
 }
+
+esp_err_t api_ping(const char *note, char *err_msg, size_t err_size)
+{
+    if (note == NULL || err_msg == NULL || err_size == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    err_msg[0] = '\0';
+
+    char time_str[24];
+    char sign_input[API_SIGN_INPUT_MAX];
+    char sn[41];
+    esp_err_t err = make_time_str(time_str, sizeof time_str);
+    if (err != ESP_OK) {
+        return err;
+    }
+    /* 同 Pi 版 SendPingCmd：sha1("salt" + time + note + device_code) */
+    if (api_sign_input(sign_input, sizeof sign_input, time_str, note, s_device_code) < 0 ||
+        sha1_hex(sign_input, sn) != ESP_OK) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    const char *keys[] = {"device_code", "time", "note", "sn"};
+    const char *vals[] = {s_device_code, time_str, note, sn};
+    char body[API_BODY_MAX];
+    if (api_form_encode(body, sizeof body, keys, vals, 4) < 0) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    char *resp = malloc(API_RESP_MAX);
+    if (resp == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    err = post_form("take_ball_ping", body, resp, API_RESP_MAX);
+    if (err == ESP_OK) {
+        cJSON *root = NULL;
+        err = parse_envelope(resp, &root, NULL, err_msg, err_size);
+        cJSON_Delete(root);
+    }
+    free(resp);
+    return err;
+}

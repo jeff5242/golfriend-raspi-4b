@@ -11,7 +11,9 @@
 
 #define UI_LCD_H_RES          1024
 #define UI_LCD_V_RES          600
-#define UI_LCD_RST_GPIO       27
+/* 重置是 GPIO0，不是廠商 board_pins.h 寫的 GPIO27。2026-11-22 實測：拉低 GPIO0 後面板
+ * 暫存器回到預設值，拉低 GPIO27 沒有變化；出廠程式傳給驅動的也是 0。 */
+#define UI_LCD_RST_GPIO       0
 #define UI_LCD_BL_GPIO        23   /* 高電位亮 */
 #define UI_LCD_DSI_LDO_CHAN   3    /* MIPI D-PHY 電源：P4 內建 LDO 第 3 路 */
 #define UI_LCD_DSI_LDO_MV     2500
