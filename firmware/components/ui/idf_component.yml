@@ -1,4 +1,8 @@
-## 板子型號確認、要接 BSP 時再打開。版本在第一次建置成功後由 dependencies.lock 固定。
-dependencies: {}
-#  lvgl/lvgl: "*"
-#  espressif/esp_lvgl_port: "*"
+## 螢幕：Guition JC1060P470（7 吋 1024x600 MIPI-DSI、GT911 觸控）。
+## 出廠程式用 EK79007 驅動（2026-11-22 開機 log：Install EK79007 LCD control panel），這裡沿用。
+## 實際版本記在 dependencies.lock。
+dependencies:
+  lvgl/lvgl: "^9.2.0"
+  espressif/esp_lvgl_port: "^2.6.0"
+  espressif/esp_lcd_ek79007: ">=2.0.1,<3.0.0"
+  espressif/esp_lcd_touch_gt911: "^1.1.0"

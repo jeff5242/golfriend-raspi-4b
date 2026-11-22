@@ -1,0 +1,6 @@
+# 16 MB Flash。加入 LVGL 後 app 超過內建「單一大 app」分割表的 1.5 MB，改用自訂分割表。
+# 加 OTA 時改成 ota_0／ota_1 兩個 app 分割區。
+# Name,   Type, SubType, Offset,  Size
+nvs,      data, nvs,     0x9000,  0x6000
+phy_init, data, phy,     0xf000,  0x1000
+factory,  app,  factory, 0x10000, 0x600000

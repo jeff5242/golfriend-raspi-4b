@@ -1,3 +1,4 @@
-idf_component_register(SRCS "ui.c"
-                       INCLUDE_DIRS "include")
-# 接上 BSP 時加：REQUIRES esp_lcd，並在 idf_component.yml 打開 lvgl 與 esp_lvgl_port
+idf_component_register(SRCS "ui.c" "ui_board.c"
+                       INCLUDE_DIRS "include"
+                       PRIV_INCLUDE_DIRS "."
+                       REQUIRES esp_lcd esp_driver_i2c esp_driver_ledc esp_driver_gpio esp_hw_support)
