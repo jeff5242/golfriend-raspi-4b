@@ -115,6 +115,12 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         const bool was_connected = s_connected;
+        const wifi_event_sta_disconnected_t *info = data;
+        /* reason 對照 esp_wifi_types 的 wifi_err_reason_t，例：15 密碼錯、201 找不到 AP、8 自己離線 */
+        ESP_LOGW(TAG, "disconnected from [%u] %s: reason=%d rssi=%d%s", (unsigned)s_policy.current,
+                 s_aps[s_policy.current].ssid, info != NULL ? (int)info->reason : -1,
+                 info != NULL ? (int)info->rssi : 0,
+                 s_switching_to_primary ? " (switching to primary)" : "");
         if (s_switching_to_primary) {
             s_switching_to_primary = false;  /* policy 已經選好主要 SSID */
         } else {

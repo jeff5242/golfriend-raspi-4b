@@ -137,6 +137,8 @@ static app_event_t do_query(void)
                  s_result.type);
         return prepare_dispense() ? APP_EV_API_OK : APP_EV_API_FAIL;
     }
+    /* 螢幕還沒接上時，只能從 log 看伺服器回了什麼錯誤代碼 */
+    ESP_LOGW(TAG, "take_ball failed: %s code=%s", esp_err_to_name(err), code);
     set_error(api_failure_text(API_CMD_TAKE_BALL, err == ESP_FAIL, code));
     return APP_EV_API_FAIL;
 }
@@ -151,6 +153,8 @@ static app_event_t do_confirm(void)
     if (err == ESP_OK) {
         return APP_EV_CONFIRM_OK;
     }
+    ESP_LOGW(TAG, "take_ball_confirm failed: %s code=%s id=%s", esp_err_to_name(err), code,
+             s_result.id);
     set_error(api_failure_text(API_CMD_TAKE_BALL_CONFIRM, err == ESP_FAIL, code));
     return APP_EV_API_FAIL;
 }
