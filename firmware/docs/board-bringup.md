@@ -353,6 +353,8 @@ menuconfig 的項目都在「Golfriend Ball Dispenser」選單：
 | 鏡頭啟動、取影像 | 已驗證：`Detected Camera sensor PID=0x5602`，影像內容正確 |
 | 處理速度 | 已驗證：每張約 75 ms |
 | 讀手機螢幕上的 QR Code | 已驗證：內容 `9557` 的 QR Code 讀出 `9557`，後台 `take_ball` 回 200 |
+| 讀手機螢幕上的 Code 128 條碼 | 已驗證：`%6659` 讀出 `6659`，`take_ball` 與 `take_ball_confirm` 都回 200 |
+| 讀到後跳輸入畫面、5 秒自動送出 | 已驗證（條碼）：`STANDBY -> SCANNED`，5.1 秒後 `SCANNED -> QUERY` |
 | 距離、光線、手機亮度的可用範圍 | 未驗證 |
 
 ## 5. 升級 C6 韌體（不能保證還原，最後才做）
