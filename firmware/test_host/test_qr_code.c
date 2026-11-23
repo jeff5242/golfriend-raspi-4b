@@ -44,65 +44,25 @@ static void test_payload_without_usable_digits_is_rejected(void)
     CHECK(!conv("1234", small, sizeof small));
 }
 
-static void test_gate_sends_a_code_once_while_it_stays_in_view(void)
+static void test_gray_half_uses_green_channel(void)
 {
-    qr_gate_t g = {0};
-    CHECK(qr_gate_accept(&g, "4175", 1000, 5000));
-    CHECK(!qr_gate_accept(&g, "4175", 1200, 5000));
-    CHECK(!qr_gate_accept(&g, "4175", 6000, 5000));   /* 一直在鏡頭前：每次看到都延長 */
-    CHECK(!qr_gate_accept(&g, "4175", 10900, 5000));
-}
-
-static void test_gate_allows_same_code_after_it_left_long_enough(void)
-{
-    qr_gate_t g = {0};
-    CHECK(qr_gate_accept(&g, "4175", 1000, 5000));
-    CHECK(qr_gate_accept(&g, "4175", 6001, 5000));
-}
-
-static void test_gate_accepts_a_different_code_immediately(void)
-{
-    qr_gate_t g = {0};
-    CHECK(qr_gate_accept(&g, "4175", 1000, 5000));
-    CHECK(qr_gate_accept(&g, "8200", 1100, 5000));
-    CHECK(!qr_gate_accept(&g, "8200", 1200, 5000));
-}
-
-static void test_gate_survives_tick_wraparound(void)
-{
-    qr_gate_t g = {0};
-    CHECK(qr_gate_accept(&g, "4175", 0xFFFFFF00u, 5000));
-    CHECK(!qr_gate_accept(&g, "4175", 0x00000100u, 5000));  /* 過了 512 ms */
-    CHECK(qr_gate_accept(&g, "4175", 0x00000100u + 6000, 5000));
-}
-
-static void test_gate_rejects_null_and_empty(void)
-{
-    qr_gate_t g = {0};
-    CHECK(!qr_gate_accept(NULL, "1", 0, 5000));
-    CHECK(!qr_gate_accept(&g, NULL, 0, 5000));
-    CHECK(!qr_gate_accept(&g, "", 0, 5000));
-}
-
-static void test_gray_half_uses_green_channel_of_every_other_pixel(void)
-{
-    /* 4x2 影像：白、黑、純綠、純紅／第二列不取 */
+    /* 4x2 影像：左邊 2x2 全白，右邊 2x2 全紅（沒有綠色） */
     const uint8_t src[] = {
-        0xFF, 0xFF, 0x00, 0x00, 0xE0, 0x07, 0x00, 0xF8,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0xF8, 0x00, 0xF8,
+        0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0xF8, 0x00, 0xF8,
     };
     uint8_t dst[2] = {1, 1};
     qr_gray_half_from_rgb565(src, 4, 2, dst, false);
-    CHECK(dst[0] == 0xFC);  /* 第 0 個像素：白，綠色 6 位元全滿 */
-    CHECK(dst[1] == 0xFC);  /* 第 2 個像素：純綠 */
+    CHECK(dst[0] == 0xFC);
+    CHECK(dst[1] == 0x00);
 }
 
 static void test_gray_half_can_mirror_each_row(void)
 {
-    /* 感光元件輸出的影像左右相反；辨識前要翻回來。4x2 影像：黑、黑、純綠、黑 */
+    /* 感光元件輸出的影像左右相反；辨識前要翻回來。4x2 影像：左邊 2x2 全黑，右邊 2x2 全綠 */
     const uint8_t src[] = {
-        0x00, 0x00, 0x00, 0x00, 0xE0, 0x07, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0xE0, 0x07, 0xE0, 0x07,
+        0x00, 0x00, 0x00, 0x00, 0xE0, 0x07, 0xE0, 0x07,
     };
     uint8_t dst[2] = {1, 1};
     qr_gray_half_from_rgb565(src, 4, 2, dst, false);
@@ -114,29 +74,65 @@ static void test_gray_half_can_mirror_each_row(void)
 static void test_status_shows_found_then_read(void)
 {
     qr_status_t st = {0};
-    CHECK(qr_status_update(&st, false, false, 0, 1500) == QR_SCAN_IDLE);
-    CHECK(qr_status_update(&st, true, false, 100, 1500) == QR_SCAN_FOUND);
-    CHECK(qr_status_update(&st, true, true, 200, 1500) == QR_SCAN_READ);
+    CHECK(qr_status_update(&st, QR_SCAN_IDLE, 0, 1500) == QR_SCAN_IDLE);
+    CHECK(qr_status_update(&st, QR_SCAN_FOUND, 100, 1500) == QR_SCAN_FOUND);
+    CHECK(qr_status_update(&st, QR_SCAN_READ, 200, 1500) == QR_SCAN_READ);
 }
 
 static void test_status_holds_before_going_back_to_idle(void)
 {
     /* 辨識結果一張有、一張沒有時，畫面上的字不得閃爍 */
     qr_status_t st = {0};
-    CHECK(qr_status_update(&st, true, false, 1000, 1500) == QR_SCAN_FOUND);
-    CHECK(qr_status_update(&st, false, false, 1100, 1500) == QR_SCAN_FOUND);
-    CHECK(qr_status_update(&st, false, false, 2500, 1500) == QR_SCAN_FOUND);
-    CHECK(qr_status_update(&st, false, false, 2501, 1500) == QR_SCAN_IDLE);
+    CHECK(qr_status_update(&st, QR_SCAN_FOUND, 1000, 1500) == QR_SCAN_FOUND);
+    CHECK(qr_status_update(&st, QR_SCAN_IDLE, 1100, 1500) == QR_SCAN_FOUND);
+    CHECK(qr_status_update(&st, QR_SCAN_IDLE, 2500, 1500) == QR_SCAN_FOUND);
+    CHECK(qr_status_update(&st, QR_SCAN_IDLE, 2501, 1500) == QR_SCAN_IDLE);
 }
 
-static void test_status_read_is_not_replaced_by_found_during_hold(void)
+static void test_status_read_is_held_over_found(void)
 {
-    /* 讀到之後，同一張碼還在鏡頭前：維持「已讀取」，不退回「偵測到」 */
     qr_status_t st = {0};
-    CHECK(qr_status_update(&st, true, true, 1000, 1500) == QR_SCAN_READ);
-    CHECK(qr_status_update(&st, true, false, 1200, 1500) == QR_SCAN_READ);
-    CHECK(qr_status_update(&st, true, false, 2600, 1500) == QR_SCAN_FOUND);
-    CHECK(qr_status_update(NULL, true, true, 0, 1500) == QR_SCAN_IDLE);
+    CHECK(qr_status_update(&st, QR_SCAN_READ, 1000, 1500) == QR_SCAN_READ);
+    CHECK(qr_status_update(&st, QR_SCAN_FOUND, 1200, 1500) == QR_SCAN_READ);
+    CHECK(qr_status_update(&st, QR_SCAN_FOUND, 2600, 1500) == QR_SCAN_FOUND);
+    CHECK(qr_status_update(NULL, QR_SCAN_READ, 0, 1500) == QR_SCAN_IDLE);
+}
+
+static void test_status_too_close_is_shown_and_held(void)
+{
+    /* 只拍到半截條碼：提示「請拿遠一點」，而且不被「偵測到」蓋掉 */
+    qr_status_t st = {0};
+    CHECK(qr_status_update(&st, QR_SCAN_TOO_CLOSE, 1000, 1500) == QR_SCAN_TOO_CLOSE);
+    CHECK(qr_status_update(&st, QR_SCAN_FOUND, 1200, 1500) == QR_SCAN_TOO_CLOSE);
+    CHECK(qr_status_update(&st, QR_SCAN_IDLE, 2400, 1500) == QR_SCAN_TOO_CLOSE);
+    CHECK(qr_status_update(&st, QR_SCAN_READ, 2450, 1500) == QR_SCAN_READ);
+}
+
+static void test_gray_crop_copies_the_centre_at_full_resolution(void)
+{
+    /* 遠一點的 QR Code 在影像裡比較小：中間那一塊不縮小，直接取用 */
+    uint8_t src[6 * 4 * 2] = {0};
+    /* 6x4 影像，只有 (2,1) 與 (3,2) 是綠色 */
+    src[(1 * 6 + 2) * 2] = 0xE0; src[(1 * 6 + 2) * 2 + 1] = 0x07;
+    src[(2 * 6 + 3) * 2] = 0xE0; src[(2 * 6 + 3) * 2 + 1] = 0x07;
+    uint8_t dst[4] = {9, 9, 9, 9};
+    qr_gray_crop_from_rgb565(src, 6, 4, 2, 2, dst, false);  /* 中間 2x2：x 2..3，y 1..2 */
+    CHECK(dst[0] == 0xFC && dst[1] == 0x00 && dst[2] == 0x00 && dst[3] == 0xFC);
+    qr_gray_crop_from_rgb565(src, 6, 4, 2, 2, dst, true);
+    CHECK(dst[0] == 0x00 && dst[1] == 0xFC && dst[2] == 0xFC && dst[3] == 0x00);
+}
+
+static void test_gray_half_averages_each_2x2_block(void)
+{
+    /* 手機螢幕有細紋；只取單一像素會出現雜訊，所以每 2x2 取平均 */
+    const uint8_t src[] = {
+        0xE0, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,   /* 綠 黑 | 黑 黑 */
+        0xE0, 0x07, 0x00, 0x00, 0x00, 0x00, 0xE0, 0x07,   /* 綠 黑 | 黑 綠 */
+    };
+    uint8_t dst[2] = {1, 1};
+    qr_gray_half_from_rgb565(src, 4, 2, dst, false);
+    CHECK(dst[0] == 0x7E);  /* (0xFC + 0 + 0xFC + 0) / 4 */
+    CHECK(dst[1] == 0x3F);  /* (0 + 0 + 0 + 0xFC) / 4 */
 }
 
 int main(void)
@@ -144,15 +140,13 @@ int main(void)
     RUN(test_plain_digits_pass_through);
     RUN(test_non_digit_characters_are_removed);
     RUN(test_payload_without_usable_digits_is_rejected);
-    RUN(test_gate_sends_a_code_once_while_it_stays_in_view);
-    RUN(test_gate_allows_same_code_after_it_left_long_enough);
-    RUN(test_gate_accepts_a_different_code_immediately);
-    RUN(test_gate_survives_tick_wraparound);
-    RUN(test_gate_rejects_null_and_empty);
-    RUN(test_gray_half_uses_green_channel_of_every_other_pixel);
+    RUN(test_gray_half_uses_green_channel);
+    RUN(test_gray_half_averages_each_2x2_block);
     RUN(test_gray_half_can_mirror_each_row);
     RUN(test_status_shows_found_then_read);
     RUN(test_status_holds_before_going_back_to_idle);
-    RUN(test_status_read_is_not_replaced_by_found_during_hold);
+    RUN(test_status_read_is_held_over_found);
+    RUN(test_status_too_close_is_shown_and_held);
+    RUN(test_gray_crop_copies_the_centre_at_full_resolution);
     return TEST_SUMMARY();
 }

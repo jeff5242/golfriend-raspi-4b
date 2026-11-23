@@ -248,9 +248,14 @@ esp_err_t ui_init(void)
         .hres = UI_LCD_H_RES,
         .vres = UI_LCD_V_RES,
         .color_format = LV_COLOR_FORMAT_RGB565,
-        .flags = {.buff_dma = true, .buff_spiram = true, .full_refresh = true},
+        .flags = {.buff_dma = true, .buff_spiram = true, .direct_mode = true},
     };
-    /* 直接畫在面板的兩張畫面記憶體，整張畫完才在垂直同步時切換 */
+    /*
+     * 直接畫在面板的兩張畫面記憶體，畫完才在垂直同步時切換。
+     * 用 direct_mode（只重畫有變的區域），不用 full_refresh（每次重畫整個螢幕）：
+     * full_refresh 時一次重畫要 112 ms，輸入畫面的倒數條讓它不停重畫，
+     * 按數字鍵約 1 秒才看到字（2026-11-23 實測）。LVGL 會把畫過的區域同步到另一張。
+     */
     const lvgl_port_display_dsi_cfg_t dsi_cfg = {.flags = {.avoid_tearing = true}};
     lv_display_t *disp = lvgl_port_add_disp_dsi(&disp_cfg, &dsi_cfg);
     if (disp == NULL) {
@@ -295,7 +300,19 @@ void ui_show_input(const char *typed, uint32_t timeout_ms)
 {
     ESP_LOGI(TAG, "[input] %s", typed != NULL ? typed : "");
     if (show_begin(UI_VIEW_INPUT, "", "")) {
+        ui_input_set_mode(false);
         ui_input_set_text(typed != NULL ? typed : "");
+        ui_input_restart_countdown(timeout_ms);
+        lvgl_port_unlock();
+    }
+}
+
+void ui_show_scanned(const char *code, uint32_t timeout_ms)
+{
+    ESP_LOGI(TAG, "[scanned] %s", code != NULL ? code : "");
+    if (show_begin(UI_VIEW_INPUT, "", "")) {
+        ui_input_set_mode(true);
+        ui_input_set_text(code != NULL ? code : "");
         ui_input_restart_countdown(timeout_ms);
         lvgl_port_unlock();
     }

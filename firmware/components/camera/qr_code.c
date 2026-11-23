@@ -22,18 +22,10 @@ bool qr_code_from_payload(const uint8_t *payload, size_t len, char *out, size_t 
     return n > 0;
 }
 
-bool qr_gate_accept(qr_gate_t *gate, const char *code, uint32_t now_ms, uint32_t hold_ms)
+/* RGB565 的綠色通道（6 位元） */
+static inline unsigned green6(const uint8_t *p)
 {
-    if (gate == NULL || code == NULL || code[0] == '\0' || strlen(code) >= QR_CODE_MAX) {
-        return false;
-    }
-    const bool same = gate->has_last && strcmp(gate->last, code) == 0;
-    /* 無號數相減：now_ms 溢位繞回時結果仍然正確 */
-    const bool still_held = same && (uint32_t)(now_ms - gate->last_seen_ms) <= hold_ms;
-    strcpy(gate->last, code);
-    gate->last_seen_ms = now_ms;
-    gate->has_last = true;
-    return !still_held;
+    return ((unsigned)(p[0] | (p[1] << 8)) >> 5) & 0x3F;
 }
 
 void qr_gray_half_from_rgb565(const uint8_t *src, int w, int h, uint8_t *dst, bool mirror)
@@ -43,24 +35,44 @@ void qr_gray_half_from_rgb565(const uint8_t *src, int w, int h, uint8_t *dst, bo
     }
     const int dw = w / 2;
     const int dh = h / 2;
+    const size_t stride = (size_t)w * 2;
     for (int y = 0; y < dh; y++) {
-        const uint8_t *row = src + (size_t)(y * 2) * (size_t)w * 2;
+        const uint8_t *row0 = src + (size_t)(y * 2) * stride;
+        const uint8_t *row1 = row0 + stride;
         for (int x = 0; x < dw; x++) {
-            const uint8_t *p = row + (size_t)(x * 2) * 2;
-            const uint16_t px = (uint16_t)(p[0] | (p[1] << 8));
-            dst[mirror ? dw - 1 - x : x] = (uint8_t)(((px >> 5) & 0x3F) << 2);
+            const size_t off = (size_t)(x * 2) * 2;
+            /* 四個 6 位元的值相加是 8 位元：等於平均後再放大成 0–252 */
+            const unsigned sum = green6(row0 + off) + green6(row0 + off + 2) +
+                                 green6(row1 + off) + green6(row1 + off + 2);
+            dst[mirror ? dw - 1 - x : x] = (uint8_t)sum;
         }
         dst += dw;
     }
 }
 
-qr_scan_state_t qr_status_update(qr_status_t *st, bool found, bool read, uint32_t now_ms,
+void qr_gray_crop_from_rgb565(const uint8_t *src, int w, int h, int dw, int dh, uint8_t *dst,
+                              bool mirror)
+{
+    if (src == NULL || dst == NULL || dw <= 0 || dh <= 0 || dw > w || dh > h) {
+        return;
+    }
+    const int x0 = (w - dw) / 2;
+    const int y0 = (h - dh) / 2;
+    for (int y = 0; y < dh; y++) {
+        const uint8_t *row = src + ((size_t)(y0 + y) * (size_t)w + (size_t)x0) * 2;
+        for (int x = 0; x < dw; x++) {
+            dst[mirror ? dw - 1 - x : x] = (uint8_t)(green6(row + (size_t)x * 2) << 2);
+        }
+        dst += dw;
+    }
+}
+
+qr_scan_state_t qr_status_update(qr_status_t *st, qr_scan_state_t seen, uint32_t now_ms,
                                  uint32_t hold_ms)
 {
     if (st == NULL) {
         return QR_SCAN_IDLE;
     }
-    const qr_scan_state_t seen = read ? QR_SCAN_READ : found ? QR_SCAN_FOUND : QR_SCAN_IDLE;
     const bool holding = (uint32_t)(now_ms - st->since_ms) <= hold_ms;
     if (seen >= st->shown) {
         if (seen != QR_SCAN_IDLE || st->shown != QR_SCAN_IDLE) {

@@ -3,6 +3,7 @@
  * 板上鏡頭（OV02C10，MIPI-CSI）掃 QR Code。
  * 背景工作持續取影像、辨識；讀到新的領球碼時呼叫 callback（同一張碼只呼叫一次）。
  */
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -20,12 +21,17 @@ typedef void (*camera_code_cb_t)(const char *code, void *ctx);
  */
 esp_err_t camera_start(camera_code_cb_t cb, void *ctx);
 
-/* 給畫面用的回報。兩個 callback 都在鏡頭工作裡執行，不得久留；可以是 NULL。 */
+/* 給畫面用的回報。callback 都在鏡頭工作裡執行，不得久留；可以是 NULL。 */
 typedef struct {
     /* status 是 qr_scan_state_t（見 qr_code.h），只在改變時呼叫 */
     void (*on_status)(int status, void *ctx);
     /* 每隔幾張影像呼叫一次。gray 是 8 位元灰階，只在 callback 期間有效 */
     void (*on_preview)(const uint8_t *gray, int w, int h, void *ctx);
+    /*
+     * 預覽要不要顯示：畫面有變動或看到碼時 active=true，之後 20 秒沒有變動就 false。
+     * 只在改變時呼叫；開機時是 false（還沒呼叫前視為不顯示）。
+     */
+    void (*on_activity)(bool active, void *ctx);
     void *ctx;
 } camera_observer_t;
 

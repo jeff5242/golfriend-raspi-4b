@@ -29,6 +29,8 @@
 static lv_obj_t *s_root;
 static lv_obj_t *s_code;
 static lv_obj_t *s_countdown;
+static lv_obj_t *s_title;
+static lv_obj_t *s_hint;
 static ui_keypad_cb_t s_on_key;
 static void *s_ctx;
 
@@ -72,7 +74,7 @@ static void build_panel(void)
     lv_obj_set_style_border_width(panel, 1, 0);
     lv_obj_set_style_border_color(panel, lv_color_hex(UI_COLOR_LINE), 0);
 
-    add_label(panel, &ui_font_tc_56, UI_COLOR_TEXT, TITLE_Y, "請輸入領球碼");
+    s_title = add_label(panel, &ui_font_tc_56, UI_COLOR_TEXT, TITLE_Y, "請輸入領球碼");
     s_code = add_label(panel, &ui_font_tc_56, UI_COLOR_TEXT, CODE_Y, "");
 
     lv_obj_t *underline = lv_obj_create(panel);
@@ -89,7 +91,7 @@ static void build_panel(void)
     lv_obj_set_style_bg_opa(s_countdown, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_countdown, lv_color_hex(UI_COLOR_ACCENT), LV_PART_INDICATOR);
 
-    add_label(panel, &ui_font_tc_24, UI_COLOR_TEXT_MUTED, HINT_Y, "倒數結束會回到待機");
+    s_hint = add_label(panel, &ui_font_tc_24, UI_COLOR_TEXT_MUTED, HINT_Y, "倒數結束會回到待機");
 }
 
 typedef struct {
@@ -198,4 +200,13 @@ void ui_input_restart_countdown(uint32_t timeout_ms)
     lv_anim_set_values(&anim, (int32_t)timeout_ms, 0);
     lv_anim_set_duration(&anim, timeout_ms);
     lv_anim_start(&anim);
+}
+
+void ui_input_set_mode(bool scanned)
+{
+    if (s_title == NULL || s_hint == NULL) {
+        return;
+    }
+    lv_label_set_text(s_title, scanned ? "已讀取領球碼" : "請輸入領球碼");
+    lv_label_set_text(s_hint, scanned ? "倒數結束會自動送出\n按「刪除」可以取消" : "倒數結束會回到待機");
 }

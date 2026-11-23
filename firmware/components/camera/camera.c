@@ -1,4 +1,6 @@
 #include "camera.h"
+#include "code128.h"
+#include "motion.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -30,17 +32,17 @@ static const char *TAG = "camera";
 #define CAM_TASK_STACK      (32 * 1024)  /* quirc 解碼會用到數 KB 的堆疊 */
 #define CAM_TASK_PRIORITY   3            /* 低於畫面與主流程 */
 #define CAM_FRAME_GAP_MS    80           /* 兩張影像之間讓出 CPU */
-/*
- * 同一張碼離開鏡頭多久後可以再送一次。
- * 不是每張影像都讀得出來（2026-11-23 實測 71 張只讀出 3 張），間隔太短會把同一張碼重複送給後台。
- */
-#define CAM_SAME_CODE_HOLD_MS 30000
 #define CAM_STATS_PERIOD_US (30 * 1000000LL)
 #define CAM_STATUS_HOLD_MS  1500         /* 畫面上的掃描狀態至少維持這麼久 */
-#define CAM_PREVIEW_EVERY   2            /* 每幾張影像更新一次預覽 */
 #define CAM_FAIL_LOG_PERIOD_MS 2000      /* 讀不出來的原因最多多久印一次 */
 #define CAM_SENSOR_MIRRORED true         /* 感光元件輸出左右相反（2026-11-23 實拍 QR Code 的定位點確認） */
 #define CAM_PAYLOAD_LOG_MAX 24           /* log 最多印幾個 bytes 的 QR 內容 */
+#define BARCODE_ROWS        12           /* 每張影像橫切幾列找一維條碼 */
+#define BARCODE_TOP_PCT     15           /* 從影像高度的幾 % 開始切 */
+#define BARCODE_BOTTOM_PCT  85
+#define BARCODE_CONFIRM_MS  2000         /* 一維條碼的檢查碼比較弱：這段時間內讀到兩次相同內容才算數 */
+#define CAM_MAX_WIDTH       1920
+#define CAM_PREVIEW_HOLD_MS 20000        /* 畫面沒有變動這麼久後隱藏預覽 */
 #define DUMP_STEP           2            /* 除錯影像再縮一半，傳輸比較快 */
 
 static camera_code_cb_t s_cb;
@@ -132,6 +134,51 @@ static void dump_gray(const uint8_t *gray, int w, int h)
     printf("CAMDUMP-END\n");
 }
 
+/* 取出影像的第 y 列（綠色通道），需要時左右對調 */
+static void gray_row(const uint8_t *rgb565, int w, int y, uint8_t *row)
+{
+    const uint8_t *p = rgb565 + (size_t)y * (size_t)w * 2;
+    for (int x = 0; x < w; x++, p += 2) {
+        const unsigned g = ((unsigned)(p[0] | (p[1] << 8)) >> 5) & 0x3F;
+        row[CAM_SENSOR_MIRRORED ? w - 1 - x : x] = (uint8_t)(g << 2);
+    }
+}
+
+/*
+ * 在原始解析度的影像上橫切幾列找 Code 128 條碼。
+ * 連續兩次讀到相同內容才回傳 true 並把領球碼寫到 code。
+ * *partial：有任何一列只拍到半截條碼（手機太近）。
+ */
+static bool scan_barcode(const uint8_t *rgb565, int w, int h, uint8_t *row, char *code,
+                         size_t code_size, bool *partial)
+{
+    *partial = false;
+    static char s_pending[CODE128_TEXT_MAX];
+    static uint32_t s_pending_ms;
+    char text[CODE128_TEXT_MAX];
+    for (int i = 0; i < BARCODE_ROWS; i++) {
+        const int pct = BARCODE_TOP_PCT + (BARCODE_BOTTOM_PCT - BARCODE_TOP_PCT) * i / (BARCODE_ROWS - 1);
+        gray_row(rgb565, w, h * pct / 100, row);
+        const code128_result_t result = code128_scan_row(row, w, text, sizeof text);
+        if (result != CODE128_OK) {
+            *partial = *partial || result == CODE128_PARTIAL;
+            continue;
+        }
+        const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        const bool confirmed = strcmp(text, s_pending) == 0 &&
+                               (uint32_t)(now_ms - s_pending_ms) <= BARCODE_CONFIRM_MS;
+        strlcpy(s_pending, text, sizeof s_pending);
+        s_pending_ms = now_ms;
+        if (!confirmed) {
+            return false;  /* 第一次看到：等下一張影像確認 */
+        }
+        s_pending[0] = '\0';
+        ESP_LOGI(TAG, "barcode raw: %s", text);
+        return qr_code_from_payload((const uint8_t *)text, strlen(text), code, code_size);
+    }
+    return false;
+}
+
 /* 讀不出來的原因：限制頻率，否則碼停在鏡頭前時每張影像都印一行 */
 static void log_decode_failure(const char *reason)
 {
@@ -161,13 +208,16 @@ static void log_payload(const struct quirc_data *data, bool flipped)
              data->ecc_level, data->data_type, data->payload_len, (int)flipped, hex);
 }
 
-/* 辨識 quirc 找到的每一張碼，把合格的領球碼送出。回傳成功解出的張數；*found 是找到的張數。 */
-static int decode_all(struct quirc *q, struct quirc_code *code, struct quirc_data *data,
-                      qr_gate_t *gate, int *found)
+/*
+ * 辨識 quirc 找到的每一張碼，把合格的領球碼送出。
+ * 回傳這張影像的結果（給畫面用）；*decoded 是成功解出的張數。
+ */
+static qr_scan_state_t decode_all(struct quirc *q, struct quirc_code *code,
+                                  struct quirc_data *data, int *decoded_out)
 {
     int decoded = 0;
     const int count = quirc_count(q);
-    *found = count;
+    qr_scan_state_t seen = count > 0 ? QR_SCAN_FOUND : QR_SCAN_IDLE;
     for (int i = 0; i < count; i++) {
         quirc_extract(q, i, code);
         quirc_decode_error_t err = quirc_decode(code, data);
@@ -188,15 +238,18 @@ static int decode_all(struct quirc *q, struct quirc_code *code, struct quirc_dat
             ESP_LOGW(TAG, "qr content is not a code (%d bytes)", data->payload_len);
             continue;
         }
-        const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
-        if (qr_gate_accept(gate, text, now_ms, CAM_SAME_CODE_HOLD_MS)) {
-            ESP_LOGI(TAG, "qr code: %s", text);
-            if (s_cb != NULL) {
-                s_cb(text, s_cb_ctx);
-            }
+        /*
+         * 每次讀到都交給主流程，不判斷是不是剛讀過（Jeff 2026-11-23）。
+         * 主流程只在待機與輸入畫面接受；處理中的那幾秒會略過。
+         */
+        ESP_LOGI(TAG, "qr code: %s", text);
+        seen = QR_SCAN_READ;
+        if (s_cb != NULL) {
+            s_cb(text, s_cb_ctx);
         }
     }
-    return decoded;
+    *decoded_out = decoded;
+    return seen;
 }
 
 static void camera_task(void *arg)
@@ -211,21 +264,26 @@ static void camera_task(void *arg)
     struct quirc_data *data = heap_caps_malloc(sizeof *data, MALLOC_CAP_SPIRAM);
     const int gw = w / 2;
     const int gh = h / 2;
-    if (fd < 0 || q == NULL || code == NULL || data == NULL || quirc_resize(q, gw, gh) != 0) {
+    uint8_t *row = w > 0 && w <= CAM_MAX_WIDTH ? heap_caps_malloc((size_t)w, MALLOC_CAP_SPIRAM) : NULL;
+    if (fd < 0 || q == NULL || code == NULL || data == NULL || row == NULL ||
+        quirc_resize(q, gw, gh) != 0) {
         ESP_LOGE(TAG, "camera task cannot start; QR scanning is off");
         vTaskDelete(NULL);
         return;
     }
     ESP_LOGI(TAG, "streaming %dx%d, scanning QR at %dx%d", w, h, gw, gh);
 
-    qr_gate_t gate = {0};
     qr_status_t status = {0};
     qr_scan_state_t reported = QR_SCAN_IDLE;
     int frames = 0;
     int decoded = 0;
     int found_frames = 0;
+    int partial_frames = 0;
     int64_t work_us = 0;
     int64_t stats_t0 = esp_timer_get_time();
+    motion_t motion = {0};
+    bool preview_active = false;
+    bool moved = false;
     for (;;) {
         struct v4l2_buffer b = {.type = V4L2_BUF_TYPE_VIDEO_CAPTURE, .memory = V4L2_MEMORY_MMAP};
         if (ioctl(fd, VIDIOC_DQBUF, &b) != 0) {
@@ -235,7 +293,20 @@ static void camera_task(void *arg)
         }
         const int64_t t0 = esp_timer_get_time();
         uint8_t *gray = quirc_begin(q, NULL, NULL);
-        qr_gray_half_from_rgb565(bufs[b.index], w, h, gray, CAM_SENSOR_MIRRORED);
+        /*
+         * 兩種取法輪流：整張縮一半（近的、大的碼），中間不縮小（遠的、小的碼）。
+         * 兩種的像素數相同，辨識時間不變。預覽只用整張的那一種。
+         */
+        const bool whole = frames % 2 == 0;
+        if (whole) {
+            qr_gray_half_from_rgb565(bufs[b.index], w, h, gray, CAM_SENSOR_MIRRORED);
+        } else {
+            qr_gray_crop_from_rgb565(bufs[b.index], w, h, gw, gh, gray, CAM_SENSOR_MIRRORED);
+        }
+        char barcode[QR_CODE_MAX];
+        bool barcode_partial = false;
+        const bool barcode_read =
+            scan_barcode(bufs[b.index], w, h, row, barcode, sizeof barcode, &barcode_partial);
         if (ioctl(fd, VIDIOC_QBUF, &b) != 0) {
             ESP_LOGW(TAG, "QBUF failed (errno %d)", errno);
         }
@@ -243,20 +314,45 @@ static void camera_task(void *arg)
             s_dump_next = false;
             dump_gray(gray, gw, gh);  /* quirc_end 會改寫緩衝區，所以先印 */
         }
-        if (s_observer.on_preview != NULL && frames % CAM_PREVIEW_EVERY == 0) {
-            s_observer.on_preview(gray, gw, gh, s_observer.ctx);
+        if (whole) {
+            /* 只比整張的那一種：兩種取法的畫面範圍不同，交錯比會一直判成有變動 */
+            moved = motion_detect(&motion, gray, gw, gh);
+            if (s_observer.on_preview != NULL) {
+                s_observer.on_preview(gray, gw, gh, s_observer.ctx);
+            }
         }
         quirc_end(q);
-        int found = 0;
-        const int read = decode_all(q, code, data, &gate, &found);
+        int read = 0;
+        qr_scan_state_t seen = decode_all(q, code, data, &read);
+        if (barcode_partial && seen < QR_SCAN_TOO_CLOSE) {
+            seen = QR_SCAN_TOO_CLOSE;
+            partial_frames++;
+        }
+        if (barcode_read) {
+            ESP_LOGI(TAG, "barcode code: %s", barcode);
+            seen = QR_SCAN_READ;
+            read++;
+            if (s_cb != NULL) {
+                s_cb(barcode, s_cb_ctx);
+            }
+        }
         decoded += read;
-        found_frames += found > 0 ? 1 : 0;
+        /* 畫面有變動、或看到碼：顯示預覽；20 秒沒有就隱藏 */
+        const bool active = motion_activity(&motion, (whole && moved) || seen != QR_SCAN_IDLE,
+                                            (uint32_t)(esp_timer_get_time() / 1000),
+                                            CAM_PREVIEW_HOLD_MS);
+        if (active != preview_active) {
+            preview_active = active;
+            if (s_observer.on_activity != NULL) {
+                s_observer.on_activity(active, s_observer.ctx);
+            }
+        }
+        found_frames += seen != QR_SCAN_IDLE ? 1 : 0;
         work_us += esp_timer_get_time() - t0;
         frames++;
 
         const qr_scan_state_t shown = qr_status_update(
-            &status, found > 0, read > 0, (uint32_t)(esp_timer_get_time() / 1000),
-            CAM_STATUS_HOLD_MS);
+            &status, seen, (uint32_t)(esp_timer_get_time() / 1000), CAM_STATUS_HOLD_MS);
         if (shown != reported) {
             reported = shown;
             if (s_observer.on_status != NULL) {
@@ -266,8 +362,10 @@ static void camera_task(void *arg)
 
         const int64_t now = esp_timer_get_time();
         if (now - stats_t0 >= CAM_STATS_PERIOD_US) {
-            ESP_LOGI(TAG, "%d frames, %d with qr, %d decoded, %lld ms per frame", frames,
-                     found_frames, decoded, (long long)(work_us / 1000 / (frames > 0 ? frames : 1)));
+            ESP_LOGI(TAG, "%d frames, %d with code, %d cut-off barcode, %d decoded, %lld ms per frame",
+                     frames, found_frames, partial_frames, decoded,
+                     (long long)(work_us / 1000 / (frames > 0 ? frames : 1)));
+            partial_frames = 0;
             frames = 0;
             decoded = 0;
             found_frames = 0;
