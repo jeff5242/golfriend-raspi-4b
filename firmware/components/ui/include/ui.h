@@ -5,6 +5,7 @@
  * 所有函式都可以從任何工作呼叫；實作時必須用 lvgl_port_lock() 保護。
  */
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -63,6 +64,44 @@ void ui_set_wifi_status(bool connected, const char *ssid, int rssi_dbm);
 
 /* 有線網路連上時，狀態列顯示 "LAN"，不顯示 WiFi 訊號 */
 void ui_set_lan_status(bool connected);
+
+/*
+ * WiFi 設定。沒有網路（有線與 WiFi 都沒連上）時，待機畫面右上角出現「WiFi 設定」鍵。
+ * 按下後是附近 WiFi 的清單；點需要密碼的網路會出現鍵盤輸入密碼，點開放網路直接連線。
+ */
+typedef enum {
+    UI_WIFI_OPEN = 0,  /* 按了待機畫面的 WiFi 設定鍵 */
+    UI_WIFI_CLOSE,     /* 按了「返回」離開設定 */
+    UI_WIFI_RESCAN,    /* 按了「重新掃描」 */
+    UI_WIFI_CONNECT,   /* 選好網路（與密碼）：用 ui_wifi_get_selection() 取 */
+    UI_WIFI_ACTIVITY,  /* 打字、點選等操作，主流程用來重新計時 */
+} ui_wifi_action_t;
+
+#define UI_WIFI_SSID_MAX     33  /* SSID 最長 32 bytes */
+#define UI_WIFI_PASSWORD_MAX 65  /* WPA2 密碼最長 64 bytes */
+#define UI_WIFI_LIST_MAX     20  /* 清單最多列幾個 */
+
+typedef struct {
+    char ssid[UI_WIFI_SSID_MAX];
+    int rssi;      /* dBm */
+    bool secured;  /* 需要密碼 */
+} ui_wifi_ap_t;
+
+/* 回呼在 LVGL 工作中執行：只能丟佇列，不得阻塞。 */
+typedef void (*ui_wifi_cb_t)(ui_wifi_action_t action, void *ctx);
+void ui_set_wifi_handler(ui_wifi_cb_t on_action, void *ctx);
+
+/* 掃描中（清單清空、顯示「掃描中」） */
+void ui_show_wifi_scanning(void);
+
+/* 顯示掃描結果。message 不是 NULL 時顯示在清單上方（例如「密碼錯誤」）。aps 會被複製。 */
+void ui_show_wifi_list(const ui_wifi_ap_t *aps, size_t count, const char *message);
+
+/* 連線中 */
+void ui_show_wifi_connecting(const char *ssid);
+
+/* 取得使用者選的網路與輸入的密碼（收到 UI_WIFI_CONNECT 後呼叫）。畫面沒初始化時回傳 false。 */
+bool ui_wifi_get_selection(char *ssid, size_t ssid_size, char *password, size_t password_size);
 
 /* 待機畫面右下角的鏡頭預覽：掃描狀態（文字與框線顏色） */
 typedef enum {

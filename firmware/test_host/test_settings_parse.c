@@ -100,8 +100,73 @@ static void test_log_token(void)
     CHECK_STR(s.log_token, "abcDEF123");
 }
 
+static void test_set_primary_wifi_demotes_old_primary(void)
+{
+    settings_t s = defaults();
+    strcpy(s.wifi1_ssid, "old");
+    strcpy(s.wifi1_password, "oldpw");
+    strcpy(s.wifi2_ssid, "backup");
+    strcpy(s.wifi2_password, "backuppw");
+    CHECK(settings_set_primary_wifi(&s, "new", "newpw"));
+    CHECK_STR(s.wifi1_ssid, "new");
+    CHECK_STR(s.wifi1_password, "newpw");
+    CHECK_STR(s.wifi2_ssid, "old");
+    CHECK_STR(s.wifi2_password, "oldpw");
+}
+
+static void test_set_primary_wifi_same_ssid_updates_password(void)
+{
+    settings_t s = defaults();
+    strcpy(s.wifi1_ssid, "golfriend");
+    strcpy(s.wifi1_password, "wrong");
+    strcpy(s.wifi2_ssid, "backup");
+    CHECK(settings_set_primary_wifi(&s, "golfriend", "right"));
+    CHECK_STR(s.wifi1_password, "right");
+    CHECK_STR(s.wifi2_ssid, "backup");  /* 備援不動 */
+}
+
+static void test_set_primary_wifi_backup_swaps(void)
+{
+    settings_t s = defaults();
+    strcpy(s.wifi1_ssid, "a");
+    strcpy(s.wifi1_password, "apw");
+    strcpy(s.wifi2_ssid, "b");
+    strcpy(s.wifi2_password, "bpw");
+    CHECK(settings_set_primary_wifi(&s, "b", "bpw"));
+    CHECK_STR(s.wifi1_ssid, "b");
+    CHECK_STR(s.wifi2_ssid, "a");
+    CHECK_STR(s.wifi2_password, "apw");
+}
+
+static void test_set_primary_wifi_open_network_and_rejects(void)
+{
+    settings_t s = defaults();
+    strcpy(s.wifi1_ssid, "a");
+    CHECK(settings_set_primary_wifi(&s, "open", NULL));
+    CHECK_STR(s.wifi1_password, "");
+
+    const settings_t before = s;
+    char long_pw[SETTINGS_PASSWORD_MAX + 1];
+    memset(long_pw, 'p', sizeof long_pw - 1);
+    long_pw[sizeof long_pw - 1] = '\0';
+    CHECK(!settings_set_primary_wifi(&s, "x", long_pw));
+    CHECK(!settings_set_primary_wifi(&s, "", "pw"));
+    CHECK(!settings_set_primary_wifi(&s, NULL, "pw"));
+    CHECK(!settings_set_primary_wifi(NULL, "x", "pw"));
+    CHECK(memcmp(&before, &s, sizeof s) == 0);
+
+    char max_pw[SETTINGS_PASSWORD_MAX];  /* 64 字元的密碼剛好放得下 */
+    memset(max_pw, 'p', sizeof max_pw - 1);
+    max_pw[sizeof max_pw - 1] = '\0';
+    CHECK(settings_set_primary_wifi(&s, "x", max_pw));
+}
+
 int main(void)
 {
+    RUN(test_set_primary_wifi_demotes_old_primary);
+    RUN(test_set_primary_wifi_same_ssid_updates_password);
+    RUN(test_set_primary_wifi_backup_swaps);
+    RUN(test_set_primary_wifi_open_network_and_rejects);
     RUN(test_parses_all_keys);
     RUN(test_missing_keys_keep_old_values);
     RUN(test_tolerates_windows_file);
