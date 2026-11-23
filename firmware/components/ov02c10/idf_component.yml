@@ -1,0 +1,3 @@
+description: OV02C10 MIPI-CSI camera sensor driver (from the Guition JC8012P4A1C_I_W_Y BSP)
+dependencies:
+  espressif/esp_cam_sensor: "2.7.*"

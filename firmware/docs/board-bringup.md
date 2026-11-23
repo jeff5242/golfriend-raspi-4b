@@ -327,6 +327,23 @@ menuconfig 的項目都在「Golfriend Ball Dispenser」選單：
 
 未驗證：從正式的 HTTPS 伺服器下載（還沒有決定放在哪裡）。
 
+### 4.7 鏡頭掃 QR Code（2026-11-23）
+
+- 鏡頭：OV02C10（200 萬像素，MIPI-CSI 1 lane）。SCCB 位址 0x36，和觸控共用 I2C（GPIO7／8）。沒有接到 P4 的重置腳位。
+- 驅動：`components/ov02c10`，來自 Guition 的板級支援套件（來源與 commit 見該目錄的 `README.md`）。官方 `esp_cam_sensor` 2.7 沒有這顆。
+- 流程：感光元件 RAW10 1288x728 → ISP 轉 RGB565 → 縮成 644x364 灰階 → `quirc` 辨識 → 領球碼走和掃碼器相同的流程。
+- 只辨識 QR Code。一維條碼不支援。
+- 同一張碼停在鏡頭前只送一次；離開鏡頭 5 秒後才可以再送。
+- QR Code 的內容：領球碼本身。前後的 `%`、空白、換行會去掉。含有其他字元或超過 31 字的內容不處理。
+- 除錯：`python3 tools/cam_capture.py /dev/cu.usbmodem101 out.pgm` 抓一張鏡頭影像（要開 `GOLF_UI_DEBUG_CONSOLE`）。log 每 30 秒印一次張數與每張處理時間。
+
+| 項目 | 狀態（2026-11-23） |
+|---|---|
+| 鏡頭啟動、取影像 | 已驗證：`Detected Camera sensor PID=0x5602`，影像內容正確 |
+| 處理速度 | 已驗證：每張約 75 ms |
+| 讀手機螢幕上的 QR Code | 未驗證 |
+| 距離、光線、手機亮度的可用範圍 | 未驗證 |
+
 ## 5. 升級 C6 韌體（不能保證還原，最後才做）
 
 ### 5.1 動手前的檢查表（全部打勾才做）

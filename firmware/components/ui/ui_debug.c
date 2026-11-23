@@ -6,6 +6,7 @@
 
 #include <stdio.h>
 
+#include "driver/i2c_master.h"
 #include "esp_cache.h"
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_log.h"
@@ -99,10 +100,34 @@ static void dump_frame_buffer(void)
     printf("FBDUMP-END\n");
 }
 
+static void (*s_extra_handler)(int c);
+
+void ui_set_debug_key_handler(void (*handler)(int c))
+{
+    s_extra_handler = handler;
+}
+
+/* 掃描觸控那條 I2C 匯流排，列出有回應的位址。用來確認鏡頭（OV02C10，0x36）有沒有接上。 */
+static void probe_i2c(void)
+{
+    i2c_master_bus_handle_t bus = NULL;
+    if (i2c_master_get_bus_handle(UI_TOUCH_I2C_PORT, &bus) != ESP_OK) {
+        ESP_LOGW(TAG, "i2c bus not ready");
+        return;
+    }
+    for (uint16_t addr = 0x08; addr < 0x78; addr++) {
+        if (i2c_master_probe(bus, addr, 50) == ESP_OK) {
+            ESP_LOGI(TAG, "i2c device at 0x%02x", addr);
+        }
+    }
+    ESP_LOGI(TAG, "i2c scan done");
+}
+
 static void run_command(int c)
 {
     switch (c) {
     case 'c': capture(); return;
+    case 'p': probe_i2c(); return;
     case 's': ui_show_standby(); break;
     case 'i': ui_show_input("1234567", 10000); break;
     case 'q': ui_show_querying(); break;
@@ -112,7 +137,11 @@ static void run_command(int c)
     case 'm': ui_show_menu("裝置 TEST_0001\n版本 P4-0.1.0\n網路 有線\nIP 192.168.1.20"); break;
     case 'u': ui_show_notice("系統更新中", "請勿關閉電源\n完成後會自動重新開機"); break;
     case 'e': ui_show_error("領球碼過期，請重新產生"); break;
-    default: return;  /* 換行與其他字元都略過 */
+    default:
+        if (s_extra_handler != NULL && c > ' ') {
+            s_extra_handler(c);
+        }
+        return;  /* 換行與空白略過 */
     }
     vTaskDelay(pdMS_TO_TICKS(RENDER_SETTLE_MS));
     printf("UIDEBUG-SHOWN %c\n", c);
@@ -151,6 +180,11 @@ void ui_debug_start(esp_lcd_panel_handle_t panel)
 void ui_debug_start(esp_lcd_panel_handle_t panel)
 {
     (void)panel;
+}
+
+void ui_set_debug_key_handler(void (*handler)(int c))
+{
+    (void)handler;
 }
 
 #endif

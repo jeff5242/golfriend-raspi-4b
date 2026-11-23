@@ -1,0 +1,3 @@
+menu "OV02C10 camera sensor (vendor driver)"
+    rsource "Kconfig.ov02c10.in"
+endmenu

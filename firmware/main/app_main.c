@@ -18,6 +18,7 @@
 #include "app_fsm.h"
 #include "app_net.h"
 #include "app_typed.h"
+#include "camera.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -106,6 +107,21 @@ static void on_scanner_line(const char *line, void *ctx)
 {
     (void)ctx;
     post(APP_EV_LINE, line);
+}
+
+/* 鏡頭讀到 QR Code：和掃碼器送來一整行相同，走同一條流程 */
+static void on_camera_code(const char *code, void *ctx)
+{
+    (void)ctx;
+    post(APP_EV_LINE, code);
+}
+
+/* 除錯主控台的鏡頭指令：v = 把下一張鏡頭影像送回電腦 */
+static void on_debug_key(int c)
+{
+    if (c == 'v') {
+        camera_debug_dump_next();
+    }
 }
 
 static void on_scanner_key(char c, void *ctx)
@@ -635,6 +651,11 @@ void app_main(void)
     if (scanner_start(on_scanner_line, on_scanner_key, NULL) != ESP_OK) {
         ESP_LOGE(TAG, "scanner disabled");
     }
+    /* 鏡頭掃 QR Code。沒有鏡頭或啟動失敗時，鍵盤與掃碼器照常可用。 */
+    if (camera_start(on_camera_code, NULL) != ESP_OK) {
+        ESP_LOGE(TAG, "camera disabled");
+    }
+    ui_set_debug_key_handler(on_debug_key);
 
     if (xTaskCreate(ping_task, "ping", PING_TASK_STACK, NULL, 3, NULL) != pdPASS) {
         ESP_LOGE(TAG, "status report disabled");

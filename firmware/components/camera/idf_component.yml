@@ -1,0 +1,6 @@
+## 板上鏡頭 OV02C10（MIPI-CSI，SCCB 位址 0x36，和觸控共用 I2C）。
+## esp_video 提供 V4L2 介面與 ISP；quirc 辨識 QR Code。
+## 實際版本記在 dependencies.lock，必須一起 commit。
+dependencies:
+  espressif/esp_video: "~2.6.0"
+  espressif/quirc: "^1.2.0"

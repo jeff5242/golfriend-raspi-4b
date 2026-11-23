@@ -64,6 +64,12 @@ void ui_set_wifi_status(bool connected, const char *ssid, int rssi_dbm);
 /* 有線網路連上時，狀態列顯示 "LAN"，不顯示 WiFi 訊號 */
 void ui_set_lan_status(bool connected);
 
+/*
+ * 除錯主控台收到畫面以外的指令字元時呼叫 handler（例如鏡頭的除錯指令）。
+ * 除錯主控台關閉時（GOLF_UI_DEBUG_CONSOLE=n）不會呼叫。
+ */
+void ui_set_debug_key_handler(void (*handler)(int c));
+
 #ifdef __cplusplus
 }
 #endif
