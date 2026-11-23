@@ -13,8 +13,8 @@ extern "C" {
 #define QR_CODE_MAX 32  /* 領球碼最長 31 字；和掃碼器一行的上限一致 */
 
 /*
- * 把 QR Code 的內容轉成領球碼：去掉前後空白、換行，以及掃碼器慣用的前後綴 '%'。
- * 內容是空的、太長、或含有非可見 ASCII 字元時回傳 false。
+ * 把 QR Code 的內容轉成領球碼：只留數字，其他字元全部拿掉（例如前綴 '%'、空白、換行）。
+ * 沒有任何數字、或數字超過 QR_CODE_MAX - 1 位時回傳 false。
  */
 bool qr_code_from_payload(const uint8_t *payload, size_t len, char *out, size_t out_size);
 
@@ -34,9 +34,27 @@ bool qr_gate_accept(qr_gate_t *gate, const char *code, uint32_t now_ms, uint32_t
 
 /*
  * RGB565（小端，每像素 2 bytes）縮成 8 位元灰階：寬高各取一半，用綠色通道當亮度。
- * dst 必須有 (w/2)*(h/2) bytes。
+ * dst 必須有 (w/2)*(h/2) bytes。mirror 為 true 時每一列左右對調。
  */
-void qr_gray_half_from_rgb565(const uint8_t *src, int w, int h, uint8_t *dst);
+void qr_gray_half_from_rgb565(const uint8_t *src, int w, int h, uint8_t *dst, bool mirror);
+
+/*
+ * 給畫面看的掃描狀態。每張影像的結果會跳動，所以狀態至少維持 hold_ms 才往回退。
+ */
+typedef enum {
+    QR_SCAN_IDLE = 0,  /* 影像裡沒有 QR Code */
+    QR_SCAN_FOUND,     /* 看到 QR Code 的定位點，但還讀不出內容 */
+    QR_SCAN_READ,      /* 讀出內容了 */
+} qr_scan_state_t;
+
+typedef struct {
+    qr_scan_state_t shown;
+    uint32_t since_ms;  /* 最後一次觀察到 shown 這個狀態的時間 */
+} qr_status_t;
+
+/* found：這張影像有 QR Code；read：這張影像讀出了內容。回傳畫面要顯示的狀態。 */
+qr_scan_state_t qr_status_update(qr_status_t *st, bool found, bool read, uint32_t now_ms,
+                                 uint32_t hold_ms);
 
 #ifdef __cplusplus
 }

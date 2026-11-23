@@ -64,6 +64,18 @@ void ui_set_wifi_status(bool connected, const char *ssid, int rssi_dbm);
 /* 有線網路連上時，狀態列顯示 "LAN"，不顯示 WiFi 訊號 */
 void ui_set_lan_status(bool connected);
 
+/* 待機畫面右下角的鏡頭預覽：掃描狀態（文字與框線顏色） */
+typedef enum {
+    UI_SCAN_IDLE = 0,  /* 請將 QR Code 對準鏡頭 */
+    UI_SCAN_FOUND,     /* 偵測到 QR Code，請拿穩 */
+    UI_SCAN_READ,      /* 已讀取 */
+} ui_scan_status_t;
+
+void ui_set_scan_status(ui_scan_status_t status);
+
+/* 更新鏡頭預覽。gray 是 8 位元灰階，至少 322x182；只在待機畫面顯示時才會處理。可以從任何工作呼叫。 */
+void ui_set_scan_preview(const uint8_t *gray, int w, int h);
+
 /*
  * 除錯主控台收到畫面以外的指令字元時呼叫 handler（例如鏡頭的除錯指令）。
  * 除錯主控台關閉時（GOLF_UI_DEBUG_CONSOLE=n）不會呼叫。

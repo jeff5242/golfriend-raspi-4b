@@ -9,6 +9,7 @@
 #include "lvgl.h"
 #include "ui_board.h"
 #include "ui_debug.h"
+#include "ui_scan.h"
 #include "ui_image.h"
 #include "ui_input.h"
 #include "ui_theme.h"
@@ -171,6 +172,7 @@ static void build_screen(void)
 
     build_menu_keys(scr);
     ui_input_build(scr, NULL, NULL);
+    ui_scan_build(scr);  /* 在待機圖之後建立：蓋在待機圖上面 */
 
     /* 最後建立：蓋在待機圖與輸入畫面上面 */
     s_net = lv_label_create(scr);
@@ -207,6 +209,7 @@ static bool show_begin(ui_view_t view, const char *title, const char *message)
     lv_obj_align(s_message, LV_ALIGN_CENTER, 0,
                  view == UI_VIEW_MENU ? UI_MENU_MESSAGE_Y : UI_MESSAGE_Y);
     ui_input_set_visible(view == UI_VIEW_INPUT);
+    ui_scan_set_visible(view == UI_VIEW_STANDBY);
     if (s_standby_image != NULL) {
         lv_obj_set_hidden(s_standby_image, view != UI_VIEW_STANDBY);
     }

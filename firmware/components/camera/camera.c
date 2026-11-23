@@ -30,13 +30,23 @@ static const char *TAG = "camera";
 #define CAM_TASK_STACK      (32 * 1024)  /* quirc 解碼會用到數 KB 的堆疊 */
 #define CAM_TASK_PRIORITY   3            /* 低於畫面與主流程 */
 #define CAM_FRAME_GAP_MS    80           /* 兩張影像之間讓出 CPU */
-#define CAM_SAME_CODE_HOLD_MS 5000       /* 同一張碼離開鏡頭多久後可以再送一次 */
+/*
+ * 同一張碼離開鏡頭多久後可以再送一次。
+ * 不是每張影像都讀得出來（2026-11-23 實測 71 張只讀出 3 張），間隔太短會把同一張碼重複送給後台。
+ */
+#define CAM_SAME_CODE_HOLD_MS 30000
 #define CAM_STATS_PERIOD_US (30 * 1000000LL)
+#define CAM_STATUS_HOLD_MS  1500         /* 畫面上的掃描狀態至少維持這麼久 */
+#define CAM_PREVIEW_EVERY   2            /* 每幾張影像更新一次預覽 */
+#define CAM_FAIL_LOG_PERIOD_MS 2000      /* 讀不出來的原因最多多久印一次 */
+#define CAM_SENSOR_MIRRORED true         /* 感光元件輸出左右相反（2026-11-23 實拍 QR Code 的定位點確認） */
+#define CAM_PAYLOAD_LOG_MAX 24           /* log 最多印幾個 bytes 的 QR 內容 */
 #define DUMP_STEP           2            /* 除錯影像再縮一半，傳輸比較快 */
 
 static camera_code_cb_t s_cb;
 static void *s_cb_ctx;
 static volatile bool s_dump_next;
+static camera_observer_t s_observer;
 
 static esp_err_t video_init(void)
 {
@@ -122,24 +132,57 @@ static void dump_gray(const uint8_t *gray, int w, int h)
     printf("CAMDUMP-END\n");
 }
 
-/* 辨識 quirc 找到的每一張碼，把合格的領球碼送出。回傳成功解出的張數。 */
+/* 讀不出來的原因：限制頻率，否則碼停在鏡頭前時每張影像都印一行 */
+static void log_decode_failure(const char *reason)
+{
+    static uint32_t s_last_ms;
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    if ((uint32_t)(now_ms - s_last_ms) >= CAM_FAIL_LOG_PERIOD_MS) {
+        s_last_ms = now_ms;
+        ESP_LOGI(TAG, "qr found but not decoded: %s", reason);
+    }
+}
+
+/* 印出 QR 的原始內容（十六進位），限制頻率。用來確認 App 產生的 QR Code 到底寫了什麼。 */
+static void log_payload(const struct quirc_data *data, bool flipped)
+{
+    static uint32_t s_last_ms;
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    if ((uint32_t)(now_ms - s_last_ms) < CAM_FAIL_LOG_PERIOD_MS) {
+        return;
+    }
+    s_last_ms = now_ms;
+    char hex[CAM_PAYLOAD_LOG_MAX * 2 + 1] = "";
+    const int n = data->payload_len < CAM_PAYLOAD_LOG_MAX ? data->payload_len : CAM_PAYLOAD_LOG_MAX;
+    for (int i = 0; i < n; i++) {
+        snprintf(hex + i * 2, 3, "%02x", data->payload[i]);
+    }
+    ESP_LOGI(TAG, "qr raw: version=%d ecc=%d type=%d len=%d flipped=%d hex=%s", data->version,
+             data->ecc_level, data->data_type, data->payload_len, (int)flipped, hex);
+}
+
+/* 辨識 quirc 找到的每一張碼，把合格的領球碼送出。回傳成功解出的張數；*found 是找到的張數。 */
 static int decode_all(struct quirc *q, struct quirc_code *code, struct quirc_data *data,
-                      qr_gate_t *gate)
+                      qr_gate_t *gate, int *found)
 {
     int decoded = 0;
     const int count = quirc_count(q);
+    *found = count;
     for (int i = 0; i < count; i++) {
         quirc_extract(q, i, code);
         quirc_decode_error_t err = quirc_decode(code, data);
+        bool flipped = false;
         if (err == QUIRC_ERROR_DATA_ECC) {
             quirc_flip(code);  /* 鏡像的碼：翻過來再試一次 */
             err = quirc_decode(code, data);
+            flipped = true;
         }
         if (err != QUIRC_SUCCESS) {
-            ESP_LOGD(TAG, "qr found but not decoded: %s", quirc_strerror(err));
+            log_decode_failure(quirc_strerror(err));
             continue;
         }
         decoded++;
+        log_payload(data, flipped);
         char text[QR_CODE_MAX];
         if (!qr_code_from_payload(data->payload, (size_t)data->payload_len, text, sizeof text)) {
             ESP_LOGW(TAG, "qr content is not a code (%d bytes)", data->payload_len);
@@ -176,8 +219,11 @@ static void camera_task(void *arg)
     ESP_LOGI(TAG, "streaming %dx%d, scanning QR at %dx%d", w, h, gw, gh);
 
     qr_gate_t gate = {0};
+    qr_status_t status = {0};
+    qr_scan_state_t reported = QR_SCAN_IDLE;
     int frames = 0;
     int decoded = 0;
+    int found_frames = 0;
     int64_t work_us = 0;
     int64_t stats_t0 = esp_timer_get_time();
     for (;;) {
@@ -189,7 +235,7 @@ static void camera_task(void *arg)
         }
         const int64_t t0 = esp_timer_get_time();
         uint8_t *gray = quirc_begin(q, NULL, NULL);
-        qr_gray_half_from_rgb565(bufs[b.index], w, h, gray);
+        qr_gray_half_from_rgb565(bufs[b.index], w, h, gray, CAM_SENSOR_MIRRORED);
         if (ioctl(fd, VIDIOC_QBUF, &b) != 0) {
             ESP_LOGW(TAG, "QBUF failed (errno %d)", errno);
         }
@@ -197,17 +243,34 @@ static void camera_task(void *arg)
             s_dump_next = false;
             dump_gray(gray, gw, gh);  /* quirc_end 會改寫緩衝區，所以先印 */
         }
+        if (s_observer.on_preview != NULL && frames % CAM_PREVIEW_EVERY == 0) {
+            s_observer.on_preview(gray, gw, gh, s_observer.ctx);
+        }
         quirc_end(q);
-        decoded += decode_all(q, code, data, &gate);
+        int found = 0;
+        const int read = decode_all(q, code, data, &gate, &found);
+        decoded += read;
+        found_frames += found > 0 ? 1 : 0;
         work_us += esp_timer_get_time() - t0;
         frames++;
 
+        const qr_scan_state_t shown = qr_status_update(
+            &status, found > 0, read > 0, (uint32_t)(esp_timer_get_time() / 1000),
+            CAM_STATUS_HOLD_MS);
+        if (shown != reported) {
+            reported = shown;
+            if (s_observer.on_status != NULL) {
+                s_observer.on_status((int)shown, s_observer.ctx);
+            }
+        }
+
         const int64_t now = esp_timer_get_time();
         if (now - stats_t0 >= CAM_STATS_PERIOD_US) {
-            ESP_LOGI(TAG, "%d frames, %d decoded, %lld ms per frame", frames, decoded,
-                     (long long)(work_us / 1000 / (frames > 0 ? frames : 1)));
+            ESP_LOGI(TAG, "%d frames, %d with qr, %d decoded, %lld ms per frame", frames,
+                     found_frames, decoded, (long long)(work_us / 1000 / (frames > 0 ? frames : 1)));
             frames = 0;
             decoded = 0;
+            found_frames = 0;
             work_us = 0;
             stats_t0 = now;
         }
@@ -224,6 +287,11 @@ esp_err_t camera_start(camera_code_cb_t cb, void *ctx)
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
+}
+
+void camera_set_observer(const camera_observer_t *observer)
+{
+    s_observer = observer != NULL ? *observer : (camera_observer_t){0};
 }
 
 void camera_debug_dump_next(void)

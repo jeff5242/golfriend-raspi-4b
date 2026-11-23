@@ -19,6 +19,7 @@
 #include "app_net.h"
 #include "app_typed.h"
 #include "camera.h"
+#include "qr_code.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -114,6 +115,21 @@ static void on_camera_code(const char *code, void *ctx)
 {
     (void)ctx;
     post(APP_EV_LINE, code);
+}
+
+/* 鏡頭的掃描狀態與預覽，轉給畫面。qr_scan_state_t 和 ui_scan_status_t 的順序相同。 */
+static void on_camera_status(int status, void *ctx)
+{
+    (void)ctx;
+    ui_set_scan_status(status == QR_SCAN_READ    ? UI_SCAN_READ
+                       : status == QR_SCAN_FOUND ? UI_SCAN_FOUND
+                                                 : UI_SCAN_IDLE);
+}
+
+static void on_camera_preview(const uint8_t *gray, int w, int h, void *ctx)
+{
+    (void)ctx;
+    ui_set_scan_preview(gray, w, h);
 }
 
 /* 除錯主控台的鏡頭指令：v = 把下一張鏡頭影像送回電腦 */
@@ -652,6 +668,9 @@ void app_main(void)
         ESP_LOGE(TAG, "scanner disabled");
     }
     /* 鏡頭掃 QR Code。沒有鏡頭或啟動失敗時，鍵盤與掃碼器照常可用。 */
+    const camera_observer_t observer = {
+        .on_status = on_camera_status, .on_preview = on_camera_preview};
+    camera_set_observer(&observer);
     if (camera_start(on_camera_code, NULL) != ESP_OK) {
         ESP_LOGE(TAG, "camera disabled");
     }
