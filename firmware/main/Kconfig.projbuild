@@ -35,6 +35,13 @@ menu "Golfriend Ball Dispenser"
         range -1 54
         default -1
 
+    config GOLF_TEST_CONFIRM_WITHOUT_MOTOR
+        bool "TEST ONLY: send take_ball_confirm (deducts points) even when the motor is not set"
+        default n
+        help
+            For verifying the deduction flow before the relay is wired. Points are
+            deducted and no ball is dispensed. Must stay off in production.
+
     config GOLF_WIFI1_SSID
         string "WiFi 1 SSID (primary)"
         default ""

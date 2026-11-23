@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 600" font-family="'PingFang TC','Noto Sans TC','Microsoft JhengHei',sans-serif">
+<rect width="780" height="600" fill="#ffffff"/>
+<text x="390" y="30" text-anchor="middle" font-size="18" font-weight="700" fill="#111">JC1060P470C 2×13 排針腳位與繼電器接線</text>
+<text x="390" y="50" text-anchor="middle" font-size="12" fill="#555">從板子背面看，核心模組（JC-ESP32P4-M3）在右邊</text>
+<rect x="330" y="92" width="110" height="26" fill="#d32f2f"/>
+<text x="385" y="110" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">3V3</text>
+<rect x="500" y="92" width="110" height="26" fill="#d32f2f"/>
+<text x="555" y="110" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">5V</text>
+<rect x="440" y="90" width="60" height="30" fill="#2b2b2b"/>
+<circle cx="455" cy="105" r="5" fill="#d4af37"/><circle cx="485" cy="105" r="5" fill="#d4af37"/>
+<text x="625" y="110" font-size="11" fill="#777">第 1 列</text>
+<rect x="330" y="122" width="110" height="26" fill="#d32f2f"/>
+<text x="385" y="140" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">3V3</text>
+<rect x="500" y="122" width="110" height="26" fill="#d32f2f"/>
+<text x="555" y="140" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">5V</text>
+<rect x="440" y="120" width="60" height="30" fill="#2b2b2b"/>
+<circle cx="455" cy="135" r="5" fill="#d4af37"/><circle cx="485" cy="135" r="5" fill="#d4af37"/>
+<text x="625" y="140" font-size="11" fill="#777">第 2 列</text>
+<rect x="330" y="152" width="110" height="26" fill="#222222"/>
+<text x="385" y="170" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">GND</text>
+<rect x="500" y="152" width="110" height="26" fill="#222222"/>
+<text x="555" y="170" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">GND</text>
+<rect x="440" y="150" width="60" height="30" fill="#2b2b2b"/>
+<circle cx="455" cy="165" r="5" fill="#d4af37"/><circle cx="485" cy="165" r="5" fill="#d4af37"/>
+<text x="625" y="170" font-size="11" fill="#777">第 3 列</text>
+<rect x="330" y="182" width="110" height="26" fill="#4caf50"/>
+<text x="385" y="200" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">GPIO1</text>
+<rect x="500" y="182" width="110" height="26" fill="#fb8c00"/>
+<text x="555" y="200" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">NC</text>
+<rect x="440" y="180" width="60" height="30" fill="#2b2b2b"/>
+<circle cx="455" cy="195" r="5" fill="#d4af37"/><circle cx="485" cy="195" r="5" fill="#d4af37"/>
+<text x="625" y="200" font-size="11" fill="#777">第 4 列</text>
+<rect x="330" y="212" width="110" height="26" fill="#4caf50"/>
+<text x="385" y="230" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">GPIO2</text>
+<rect x="500" y="212" width="110" height="26" fill="#4caf50"/>
+<text x="555" y="230" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">GPIO47</text>
+<rect x="440" y="210" width="60" height="30" fill="#2b2b2b"/>
+<circle cx="455" cy="225" r="5" fill="#d4af37"/><circle cx="485" cy="225" r="5" fill="#d4af37"/>
+<text x="625" y="230" font-size="11" fill="#777">第 5 列</text>
+<rect x="330" y="242" width="110" height="26" fill="#4caf50"/>
+<text x="385" y="260" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">GPIO3</text>
+<rect x="500" y="242" width="110" height="26" fill="#4caf50"/>
+<text x="555" y="260" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">GPIO46</text>
+<rect x="440" y="240" width="60" height="30" fill="#2b2b2b"/>
+<circle cx="455" cy="255" r="5" fill="#d4af37"/><circle cx="485" cy="255" r="5" fill="#d4af37"/>
+<text x="625" y="260" font-size="11" fill="#777">第 6 列</text>
+<rect x="330" y="272" width="110" height="26" fill="#4caf50"/>
+<text x="385" y="290" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">GPIO4</text>
+<rect x="500" y="272" width="110" height="26" fill="#4caf50"/>
+<text x="555" y="290" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">GPIO45</text>
+<rect x="440" y="270" width="60" height="30" fill="#2b2b2b"/>
+<circle cx="455" cy="285" r="5" fill="#d4af37"/><circle cx="485" cy="285" r="5" fill="#d4af37"/>
+<text x="625" y="290" font-size="11" fill="#777">第 7 列</text>
+<rect x="330" y="302" width="110" height="26" fill="#4caf50"/>
+<text x="385" y="320" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">GPIO5</text>
+<rect x="500" y="302" width="110" height="26" fill="#222222"/>
+<text x="555" y="320" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">GND</text>
+<rect x="440" y="300" width="60" height="30" fill="#2b2b2b"/>
+<circle cx="455" cy="315" r="5" fill="#d4af37"/><circle cx="485" cy="315" r="5" fill="#d4af37"/>
+<text x="625" y="320" font-size="11" fill="#777">第 8 列</text>
+<rect x="330" y="332" width="110" height="26" fill="#4caf50"/>
+<text x="385" y="350" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">GPIO20</text>
+<rect x="500" y="332" width="110" height="26" fill="#d32f2f"/>
+<text x="555" y="350" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">3V3</text>
+<rect x="440" y="330" width="60" height="30" fill="#2b2b2b"/>
+<circle cx="455" cy="345" r="5" fill="#d4af37"/><circle cx="485" cy="345" r="5" fill="#d4af37"/>
+<text x="625" y="350" font-size="11" fill="#777">第 9 列</text>
+<rect x="330" y="362" width="110" height="26" fill="#4caf50"/>
+<text x="385" y="380" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">GPIO32</text>
+<rect x="500" y="362" width="110" height="26" fill="#1e88e5"/>
+<text x="555" y="380" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">C6_U0RXD</text>
+<rect x="440" y="360" width="60" height="30" fill="#2b2b2b"/>
+<circle cx="455" cy="375" r="5" fill="#d4af37"/><circle cx="485" cy="375" r="5" fill="#d4af37"/>
+<text x="625" y="380" font-size="11" fill="#777">第 10 列</text>
+<rect x="330" y="392" width="110" height="26" fill="#4caf50"/>
+<text x="385" y="410" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">GPIO33</text>
+<rect x="500" y="392" width="110" height="26" fill="#1e88e5"/>
+<text x="555" y="410" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">C6_U0TXD</text>
+<rect x="440" y="390" width="60" height="30" fill="#2b2b2b"/>
+<circle cx="455" cy="405" r="5" fill="#d4af37"/><circle cx="485" cy="405" r="5" fill="#d4af37"/>
+<text x="625" y="410" font-size="11" fill="#777">第 11 列</text>
+<rect x="330" y="422" width="110" height="26" fill="#9575cd"/>
+<text x="385" y="440" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">I2C_SDA</text>
+<rect x="500" y="422" width="110" height="26" fill="#1e88e5"/>
+<text x="555" y="440" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">C6_IO9</text>
+<rect x="440" y="420" width="60" height="30" fill="#2b2b2b"/>
+<circle cx="455" cy="435" r="5" fill="#d4af37"/><circle cx="485" cy="435" r="5" fill="#d4af37"/>
+<text x="625" y="440" font-size="11" fill="#777">第 12 列</text>
+<rect x="330" y="452" width="110" height="26" fill="#9575cd"/>
+<text x="385" y="470" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">I2C_SCL</text>
+<rect x="500" y="452" width="110" height="26" fill="#1e88e5"/>
+<text x="555" y="470" text-anchor="middle" font-size="13" fill="#fff" font-weight="600">C6_CHIP_PU</text>
+<rect x="440" y="450" width="60" height="30" fill="#2b2b2b"/>
+<circle cx="455" cy="465" r="5" fill="#d4af37"/><circle cx="485" cy="465" r="5" fill="#d4af37"/>
+<text x="625" y="470" font-size="11" fill="#777">第 13 列</text>
+<rect x="328" y="360" width="114" height="30" fill="none" stroke="#111" stroke-width="3"/>
+<rect x="328" y="150" width="114" height="30" fill="none" stroke="#111" stroke-width="3"/>
+<rect x="498" y="90" width="114" height="30" fill="none" stroke="#111" stroke-width="3"/>
+<rect x="40" y="250" width="170" height="150" rx="6" fill="#e3f2fd" stroke="#1565c0" stroke-width="2"/>
+<text x="125" y="275" text-anchor="middle" font-size="14" font-weight="700" fill="#0d47a1">繼電器模組 HW-482</text>
+<circle cx="210" cy="300" r="6" fill="#fff" stroke="#1565c0" stroke-width="2"/>
+<text x="195" y="305" text-anchor="end" font-size="15" font-weight="700" fill="#0d47a1">+</text>
+<circle cx="210" cy="335" r="6" fill="#fff" stroke="#1565c0" stroke-width="2"/>
+<text x="195" y="340" text-anchor="end" font-size="15" font-weight="700" fill="#0d47a1">−</text>
+<circle cx="210" cy="375" r="6" fill="#fff" stroke="#1565c0" stroke-width="2"/>
+<text x="195" y="380" text-anchor="end" font-size="15" font-weight="700" fill="#0d47a1">S</text>
+<text x="52" y="308" font-size="11" fill="#333">COM、NO：</text><text x="52" y="324" font-size="11" fill="#333">串接馬達電源線</text>
+<text x="52" y="350" font-size="11" fill="#b71c1c">不得把馬達</text><text x="52" y="366" font-size="11" fill="#b71c1c">直接接 GPIO</text>
+<polyline points="216,300 250,300 250,70 555,70 555,90" fill="none" stroke="#d32f2f" stroke-width="3"/>
+<text x="262" y="64" font-size="12" fill="#d32f2f" font-weight="600">＋ → 5V（右排第 1 列）</text>
+<polyline points="216,335 285,335 285,165 330,165" fill="none" stroke="#222" stroke-width="3"/>
+<text x="100" y="170" font-size="12" fill="#222" font-weight="600">− → GND（左排第 3 列）</text>
+<polyline points="216,375 330,375" fill="none" stroke="#2e7d32" stroke-width="3"/>
+<text x="222" y="392" font-size="12" fill="#2e7d32" font-weight="600">S → GPIO32</text>
+<rect x="40" y="455" width="170" height="50" rx="6" fill="#f5f5f5" stroke="#777" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="125" y="476" text-anchor="middle" font-size="13" font-weight="700" fill="#444">光感測器（預留）</text>
+<text x="125" y="494" text-anchor="middle" font-size="11" fill="#444">輸出必須是 3.3V</text>
+<polyline points="210,480 300,480 300,405 330,405" fill="none" stroke="#777" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="216" y="474" font-size="11" fill="#555">→ GPIO33</text>
+<rect x="496" y="358" width="118" height="124" fill="none" stroke="#b71c1c" stroke-width="2" stroke-dasharray="5 3"/>
+<text x="690" y="405" font-size="11" fill="#b71c1c">連到 WiFi 晶片</text><text x="690" y="421" font-size="11" fill="#b71c1c">（C6）。</text><text x="690" y="437" font-size="11" fill="#b71c1c">不得接線</text>
+<rect x="60" y="540" width="14" height="14" fill="#d32f2f"/><text x="80" y="552" font-size="12" fill="#333">電源</text>
+<rect x="126" y="540" width="14" height="14" fill="#222222"/><text x="146" y="552" font-size="12" fill="#333">GND</text>
+<rect x="205" y="540" width="14" height="14" fill="#4caf50"/><text x="225" y="552" font-size="12" fill="#333">GPIO</text>
+<rect x="297" y="540" width="14" height="14" fill="#9575cd"/><text x="317" y="552" font-size="12" fill="#333">I2C（觸控用）</text>
+<rect x="441" y="540" width="14" height="14" fill="#1e88e5"/><text x="461" y="552" font-size="12" fill="#333">C6</text>
+<rect x="507" y="540" width="14" height="14" fill="#fb8c00"/><text x="527" y="552" font-size="12" fill="#333">空腳</text>
+<text x="60" y="582" font-size="12" fill="#333">粗黑框＝這個專案使用的三支腳。GPIO 只能接 3.3V 訊號。接線前必須拔掉電源。</text>
+</svg>

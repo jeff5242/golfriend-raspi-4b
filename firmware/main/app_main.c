@@ -299,6 +299,15 @@ static void set_error(const char *text)
     strlcpy(s_error, text, sizeof s_error);
 }
 
+#ifdef CONFIG_GOLF_TEST_CONFIRM_WITHOUT_MOTOR
+#define CONFIRM_WITHOUT_MOTOR true
+#else
+#define CONFIRM_WITHOUT_MOTOR false
+#endif
+#define CONFIRM_ONLY_NOTICE_MS 4000
+
+static bool s_confirm_only;  /* 這一筆是測試模式：已送確認，不出球 */
+
 /* 送確認（扣點）之前先算好時序、確認馬達可用。出不了球就不扣點。 */
 static bool prepare_dispense(void)
 {
@@ -310,7 +319,14 @@ static bool prepare_dispense(void)
         .interval_timer_s = s_result.interval_timer_s,
         .ball_per_plate = s_result.ball_per_plate,
     };
-    const app_dispense_check_t check = app_dispense_prepare(&params, motor_is_ready(), &s_plan);
+    const app_dispense_check_t check =
+        app_dispense_prepare(&params, motor_is_ready(), CONFIRM_WITHOUT_MOTOR, &s_plan);
+    s_confirm_only = check == APP_DISPENSE_CONFIRM_ONLY;
+    if (s_confirm_only) {
+        ESP_LOGW(TAG, "TEST MODE: confirming id=%s without motor (points will be deducted)",
+                 s_result.id);
+        return true;
+    }
     if (check == APP_DISPENSE_OK) {
         return true;
     }
@@ -418,6 +434,16 @@ static bool enter_state(app_state_t state, app_event_t *follow)
         *follow = do_confirm();
         return true;
     case APP_ST_DISPENSE:
+        if (s_confirm_only) {
+            /* 測試模式：點數已扣，沒有馬達可以跑。顯示後直接當作出球完成。 */
+            ESP_LOGW(TAG, "TEST MODE: id=%s confirmed, dispense skipped", s_result.id);
+            RLOG_OPERATION("test mode: id=%s take=%d confirmed, dispense skipped", s_result.id,
+                           s_result.take);
+            ui_show_notice("測試模式", "已扣點，未出球");
+            vTaskDelay(pdMS_TO_TICKS(CONFIRM_ONLY_NOTICE_MS));
+            *follow = APP_EV_MOTOR_DONE;
+            return true;
+        }
         if (!do_dispense()) {
             *follow = APP_EV_DISPENSE_FAIL;
             return true;
@@ -559,6 +585,9 @@ static void init_nvs(void)
 void app_main(void)
 {
     /* 馬達腳位最先初始化：越早固定在 LOW，越不會開機自動出球 */
+    if (CONFIRM_WITHOUT_MOTOR) {
+        ESP_LOGW(TAG, "TEST MODE ON: take_ball_confirm is sent without a motor (deducts points)");
+    }
     if (motor_init(CONFIG_GOLF_MOTOR_GPIO) != ESP_OK) {
         ESP_LOGE(TAG, "motor disabled");
     }

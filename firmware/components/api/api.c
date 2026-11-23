@@ -21,6 +21,7 @@ static const char *TAG = "api";
 #define API_BODY_MAX       512
 #define API_RESP_MAX       2048
 #define API_SIGN_INPUT_MAX 256
+#define PING_PATH "take_ball_ping"
 #define API_VALID_YEAR     2024
 #define API_DATE_MAX       40
 
@@ -149,6 +150,12 @@ static esp_err_t post_form(const char *path, const char *body, char *resp, size_
         ESP_LOGI(TAG, "POST %s -> %d, %d bytes", path, status, total);
         if (status != 200) {
             log_rejection(path, status, body, resp, server_date);
+        } else if (strcmp(path, PING_PATH) != 0) {
+            /* 交易類的呼叫成功時也印完整內容，方便和後台對帳。定期回報太頻繁，不印。 */
+            ESP_LOGI(TAG, "  request: %s", body);
+            ESP_LOGI(TAG, "  response: %s", resp);
+            ESP_LOGI(TAG, "  server time: %s",
+                     server_date[0] != '\0' ? server_date : "(no Date header)");
         }
         if (status != 200 && status != 400) {
             err = ESP_ERR_INVALID_RESPONSE;
@@ -352,7 +359,7 @@ esp_err_t api_ping(const char *note, char *err_msg, size_t err_size)
     if (resp == NULL) {
         return ESP_ERR_NO_MEM;
     }
-    err = post_form("take_ball_ping", body, resp, API_RESP_MAX);
+    err = post_form(PING_PATH, body, resp, API_RESP_MAX);
     if (err == ESP_OK) {
         cJSON *root = NULL;
         err = parse_envelope(resp, &root, NULL, err_msg, err_size);
