@@ -40,6 +40,7 @@
 #include "sdkconfig.h"
 #include "ui.h"
 #include "wifi_mgr.h"
+#include "wifi_scan_list.h"
 
 static const char *TAG = "app";
 
@@ -74,6 +75,8 @@ static const char *TAG = "app";
 #define PING_NOTE_MAX    64
 #define PING_RETRY_MS    5000   /* 還沒有網路或還沒對時：稍後再試 */
 #define PING_TASK_STACK  6144
+#define WIFI_IDLE_TIMEOUT_MS    60000  /* WiFi 設定沒有操作 60 秒後回待機 */
+#define WIFI_CONNECT_TIMEOUT_MS 20000  /* 連線等這麼久還沒拿到 IP 就算失敗 */
 
 typedef struct {
     app_event_t event;
@@ -90,7 +93,10 @@ static char s_error[ERROR_TEXT_MAX];
 static TaskHandle_t s_ota_task;
 static volatile bool s_backend_ok;     /* 這次開機有沒有成功回報過後台 */
 static volatile bool s_ota_manual;     /* 從系統選單按「檢查更新」：結果要顯示在畫面上 */
-static settings_t s_settings;  /* 開機時讀一次；改設定後重開機生效 */
+static settings_t s_settings;  /* 開機時讀一次；改設定後重開機生效（WiFi 設定畫面連線成功時例外） */
+static bool s_wifi_connecting;     /* WiFi 設定：已送出連線，等結果 */
+static settings_t s_wifi_pending;  /* WiFi 設定：連線成功後要存的設定 */
+static bool s_wifi_scan_ok;        /* WiFi 設定：上一次掃描有沒有取到結果 */
 
 /* ---- 回呼：只丟佇列，不做事 ------------------------------------------- */
 
@@ -176,6 +182,25 @@ static void on_ui_menu(ui_menu_action_t action, void *ctx)
                                                        : NULL);
 }
 
+/* WiFi 設定畫面的操作（在 LVGL 工作中執行）：只丟佇列 */
+static void on_ui_wifi(ui_wifi_action_t action, void *ctx)
+{
+    (void)ctx;
+    post(action == UI_WIFI_OPEN      ? APP_EV_WIFI_OPEN
+         : action == UI_WIFI_CLOSE   ? APP_EV_WIFI_CLOSE
+         : action == UI_WIFI_RESCAN  ? APP_EV_WIFI_RESCAN
+         : action == UI_WIFI_CONNECT ? APP_EV_WIFI_CONNECT
+                                     : APP_EV_WIFI_ACTIVITY,
+         NULL);
+}
+
+/* 掃描完成（在 WiFi 事件或計時器工作中執行） */
+static void on_wifi_scan_done(bool ok, void *ctx)
+{
+    (void)ctx;
+    post(APP_EV_WIFI_SCANNED, ok ? "1" : "0");
+}
+
 static void on_motor_done(esp_err_t result, void *ctx)
 {
     (void)ctx;
@@ -202,6 +227,7 @@ static void on_net_changed(void)
     }
     ui_set_lan_status(link == APP_NET_ETH);
     ui_set_wifi_status(wifi_mgr_is_connected(), wifi_mgr_ssid(), wifi_mgr_rssi());
+    post(APP_EV_NET_STATUS, NULL);  /* WiFi 設定畫面等連線結果 */
 }
 
 static void on_wifi_status(bool connected, int ap_index, void *ctx)
@@ -453,6 +479,153 @@ static void show_menu(void)
     ui_show_menu(info);
 }
 
+/* ---- WiFi 設定 --------------------------------------------------------- */
+
+static size_t settings_to_aps(const settings_t *s, wifi_mgr_ap_t *aps)
+{
+    aps[0] = (wifi_mgr_ap_t){s->wifi1_ssid, s->wifi1_password};
+    aps[1] = (wifi_mgr_ap_t){s->wifi2_ssid, s->wifi2_password};
+    return 2;
+}
+
+/* 上一次的掃描結果，轉成畫面用的格式後顯示 */
+static void show_wifi_results(const char *message)
+{
+    static wifi_scan_ap_t found[UI_WIFI_LIST_MAX];
+    static ui_wifi_ap_t aps[UI_WIFI_LIST_MAX];
+    const size_t n = wifi_mgr_scan_results(found, UI_WIFI_LIST_MAX);
+    for (size_t i = 0; i < n; i++) {
+        strlcpy(aps[i].ssid, found[i].ssid, sizeof aps[i].ssid);
+        aps[i].rssi = found[i].rssi;
+        aps[i].secured = found[i].secured;
+    }
+    ui_show_wifi_list(aps, n, message);
+}
+
+static void start_wifi_scan(void)
+{
+    if (wifi_mgr_scan_start(on_wifi_scan_done, NULL) != ESP_OK) {
+        ui_show_wifi_list(NULL, 0, "無法掃描，請按「重新掃描」");
+        return;
+    }
+    ui_show_wifi_scanning();
+}
+
+/* 放棄這次連線：WiFi 換回已儲存的設定（不留下連不上的網路） */
+static void cancel_wifi_connect(void)
+{
+    if (!s_wifi_connecting) {
+        return;
+    }
+    s_wifi_connecting = false;
+    wifi_mgr_ap_t aps[2];
+    wifi_mgr_set_aps(aps, settings_to_aps(&s_settings, aps));
+}
+
+static void wifi_connect_failed(void)
+{
+    const int reason = wifi_mgr_last_reason();
+    ESP_LOGW(TAG, "wifi settings: connect to %s failed, reason=%d", s_wifi_pending.wifi1_ssid,
+             reason);
+    RLOG_EXCEPTION("wifi settings: connect to %s failed, reason=%d", s_wifi_pending.wifi1_ssid,
+                   reason);
+    cancel_wifi_connect();
+    show_wifi_results(wifi_reason_is_auth_failure(reason) ? "密碼錯誤，請重新輸入"
+                      : wifi_reason_is_not_found(reason)  ? "找不到這個 WiFi，請靠近一點再試"
+                                                          : "連線失敗，請再試一次");
+}
+
+static void wifi_connect_start(void)
+{
+    char ssid[UI_WIFI_SSID_MAX];
+    char password[UI_WIFI_PASSWORD_MAX];
+    if (!ui_wifi_get_selection(ssid, sizeof ssid, password, sizeof password)) {
+        return;
+    }
+    s_wifi_pending = s_settings;
+    if (!settings_set_primary_wifi(&s_wifi_pending, ssid, password)) {
+        show_wifi_results("WiFi 名稱或密碼太長");
+        return;
+    }
+    wifi_mgr_ap_t aps[2];
+    if (wifi_mgr_set_aps(aps, settings_to_aps(&s_wifi_pending, aps)) != ESP_OK) {
+        show_wifi_results("連線失敗，請再試一次");
+        return;
+    }
+    s_wifi_connecting = true;
+    /* 不記密碼 */
+    ESP_LOGI(TAG, "wifi settings: connecting to %s", ssid);
+    RLOG_SYSTEM("wifi settings: connecting to %s", ssid);
+    ui_show_wifi_connecting(ssid);
+}
+
+/* 連上了：是不是剛剛選的那個網路。是的話存設定，回傳 true。 */
+static bool wifi_connect_check(void)
+{
+    if (!wifi_mgr_is_connected()) {
+        return false;
+    }
+    if (strcmp(wifi_mgr_ssid(), s_wifi_pending.wifi1_ssid) != 0) {
+        wifi_connect_failed();  /* 試不上新網路，退回備援並連上了 */
+        return false;
+    }
+    s_wifi_connecting = false;
+    s_settings = s_wifi_pending;
+    const bool saved = settings_save(&s_settings) == ESP_OK;
+    ESP_LOGI(TAG, "wifi settings: connected to %s, saved=%d", s_settings.wifi1_ssid, saved);
+    RLOG_SYSTEM("wifi settings: connected to %s, saved=%d", s_settings.wifi1_ssid, saved);
+    ui_show_notice("WiFi 設定", saved ? "連線成功" : "連線成功\n但設定無法儲存，重新開機後需要再設定");
+    vTaskDelay(pdMS_TO_TICKS(NOTICE_SHOW_MS));
+    return true;
+}
+
+/*
+ * WiFi 設定中的事件。回傳 true 表示已處理完、不交給狀態機；
+ * 回傳 false 時 *event 交給狀態機（例如連線成功改成 APP_EV_WIFI_CLOSE 回待機）。
+ */
+static bool wifi_screen_event(app_event_t *event, const app_msg_t *msg)
+{
+    switch (*event) {
+    case APP_EV_WIFI_RESCAN:
+        if (!s_wifi_connecting) {
+            start_wifi_scan();
+        }
+        return true;
+    case APP_EV_WIFI_SCANNED:
+        if (s_wifi_connecting) {
+            return true;
+        }
+        if (s_wifi_scan_ok) {
+            show_wifi_results(NULL);
+        } else {
+            ui_show_wifi_list(NULL, 0, "無法掃描，請按「重新掃描」");
+        }
+        return true;
+    case APP_EV_WIFI_CONNECT:
+        if (!s_wifi_connecting) {
+            wifi_connect_start();
+        }
+        return true;
+    case APP_EV_NET_STATUS:
+        if (s_wifi_connecting && wifi_connect_check()) {
+            *event = APP_EV_WIFI_CLOSE;
+            return false;
+        }
+        return true;
+    case APP_EV_TIMEOUT:
+        if (s_wifi_connecting) {
+            wifi_connect_failed();  /* 留在設定畫面，讓客人重選或重打密碼 */
+            return true;
+        }
+        return false;  /* 太久沒操作：回待機 */
+    case APP_EV_WIFI_CLOSE:
+        cancel_wifi_connect();  /* 連線中按「返回」：取消 */
+        return false;
+    default:
+        return false;
+    }
+}
+
 /* 進入新狀態時執行。需要立刻接著處理的事件寫到 follow，回傳 true。 */
 static bool enter_state(app_state_t state, app_event_t *follow)
 {
@@ -502,6 +675,11 @@ static bool enter_state(app_state_t state, app_event_t *follow)
         return false;
     case APP_ST_UPDATE:
         ui_show_notice("系統更新中", "請勿關閉電源\n完成後會自動重新開機");
+        return false;
+    case APP_ST_WIFI:
+        s_wifi_connecting = false;
+        RLOG_SYSTEM("wifi settings opened");
+        start_wifi_scan();
         return false;
     }
     return false;
@@ -566,6 +744,13 @@ static void handle_event(app_event_t event, const app_msg_t *msg)
                 set_error(msg->text);
             }
         }
+        if (msg != NULL && msg->event == APP_EV_WIFI_SCANNED) {
+            /* 不論在哪個狀態都要取：不取的話 WiFi 自動重連會暫停到逾時 */
+            s_wifi_scan_ok = strcmp(msg->text, "1") == 0 && wifi_mgr_scan_collect();
+        }
+        if (s_state == APP_ST_WIFI && wifi_screen_event(&event, msg)) {
+            return;
+        }
         const app_state_t next = app_fsm_next(s_state, event);
         if (next == s_state) {
             if (s_state == APP_ST_INPUT && event == APP_EV_KEY) {
@@ -589,6 +774,8 @@ static TickType_t state_timeout_ticks(app_state_t state)
     case APP_ST_SCANNED: return pdMS_TO_TICKS(SCANNED_TIMEOUT_MS);
     case APP_ST_ERROR: return pdMS_TO_TICKS(ERROR_SHOW_MS);
     case APP_ST_MENU:  return pdMS_TO_TICKS(MENU_TIMEOUT_MS);
+    case APP_ST_WIFI:
+        return pdMS_TO_TICKS(s_wifi_connecting ? WIFI_CONNECT_TIMEOUT_MS : WIFI_IDLE_TIMEOUT_MS);
     default:           return portMAX_DELAY;
     }
 }
@@ -669,6 +856,7 @@ void app_main(void)
     ESP_ERROR_CHECK(ui_init());
     ui_set_input_handlers(on_ui_touch, on_ui_key, NULL);
     ui_set_menu_handler(on_ui_menu, NULL);
+    ui_set_wifi_handler(on_ui_wifi, NULL);
     if (card_notice[0] != '\0') {
         ui_show_notice("記憶卡", card_notice);
         vTaskDelay(pdMS_TO_TICKS(NOTICE_SHOW_MS));
@@ -729,8 +917,9 @@ void app_main(void)
         bool restart = true;
         if (xQueueReceive(s_queue, &msg, wait) == pdTRUE) {
             handle_event(msg.event, &msg);
-            /* 鏡頭事件沒有換狀態時不算操作，不重新計時 */
-            restart = msg.event != APP_EV_SCAN || s_state != before;
+            /* 鏡頭事件、網路狀態變化沒有換狀態時不算操作，不重新計時 */
+            restart = (msg.event != APP_EV_SCAN && msg.event != APP_EV_NET_STATUS) ||
+                      s_state != before;
         } else {
             handle_event(timeout_event(s_state), NULL);
         }

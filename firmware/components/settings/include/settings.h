@@ -1,7 +1,7 @@
 #pragma once
 /*
  * 現場設定（裝置代碼、WiFi）。來源依優先順序：
- *   1. NVS（由 TF 卡的 config.txt 匯入後存進板子）
+ *   1. NVS（由 TF 卡的 config.txt 匯入後存進板子；WiFi 也可以在畫面上的 WiFi 設定連線成功後存入）
  *   2. menuconfig 的預設值（開發用；出貨韌體可以留空）
  * 呼叫前必須已經 nvs_flash_init()。
  */

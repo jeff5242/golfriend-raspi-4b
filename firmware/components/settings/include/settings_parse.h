@@ -44,6 +44,13 @@ typedef struct {
  */
 settings_parse_result_t settings_parse(const char *text, settings_t *out);
 
+/*
+ * 畫面上的 WiFi 設定連線成功後呼叫：ssid／password 成為主要 WiFi（wifi1），
+ * 原本的主要 WiFi 退成備援（wifi2），原本的備援捨棄。ssid 和原本的主要 WiFi 同名時只更新密碼。
+ * ssid 是空字串、或 ssid／password 太長時回傳 false，*s 不變。
+ */
+bool settings_set_primary_wifi(settings_t *s, const char *ssid, const char *password);
+
 #ifdef __cplusplus
 }
 #endif

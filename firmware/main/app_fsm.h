@@ -12,6 +12,7 @@
  *   已讀取 --按其他鍵--> 輸入（改成手動，不自動送出）
  *   待機／輸入 --維修碼--> 系統選單 --返回或逾時--> 待機
  *   待機 --找到新版--> 更新中 --失敗--> 待機（成功時重開機）
+ *   待機 --按 WiFi 設定鍵（沒有網路時才有）--> WiFi 設定 --返回、連線成功或逾時--> 待機
  */
 
 #ifdef __cplusplus
@@ -28,6 +29,7 @@ typedef enum {
     APP_ST_MENU,     /* 系統選單（維修碼開啟） */
     APP_ST_UPDATE,   /* 韌體更新中 */
     APP_ST_SCANNED,  /* 鏡頭讀到領球碼：顯示在輸入畫面，倒數後自動送出 */
+    APP_ST_WIFI,     /* WiFi 設定：掃描、選網路、輸入密碼、連線 */
 } app_state_t;
 
 typedef enum {
@@ -46,6 +48,14 @@ typedef enum {
     APP_EV_UPDATE_START, /* 找到新版韌體，要開始下載 */
     APP_EV_UPDATE_END,   /* 更新失敗或取消（成功時直接重開機） */
     APP_EV_SCAN,         /* 鏡頭讀到領球碼 */
+    APP_EV_WIFI_OPEN,    /* 按了待機畫面右上角的 WiFi 設定鍵 */
+    APP_EV_WIFI_CLOSE,   /* WiFi 設定按了「返回」，或連線成功 */
+    /* 以下只在 WiFi 設定中處理，不換狀態 */
+    APP_EV_WIFI_RESCAN,   /* 按了「重新掃描」 */
+    APP_EV_WIFI_SCANNED,  /* 掃描完成（text "1" 成功、"0" 失敗） */
+    APP_EV_WIFI_CONNECT,  /* 選好網路、輸入完密碼 */
+    APP_EV_WIFI_ACTIVITY, /* 在 WiFi 設定畫面操作（打字、點選）：重新計時 */
+    APP_EV_NET_STATUS,    /* 有線或 WiFi 連線狀態變了 */
 } app_event_t;
 
 /* 回傳下一個狀態。沒有定義的組合維持原狀態。 */

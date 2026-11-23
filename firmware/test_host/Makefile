@@ -13,7 +13,7 @@ TESTS := test_hid_keymap test_scanner_line test_motor_plan test_api_sign \
          test_scanner_devs test_motor test_app_typed test_app_net \
          test_settings_parse test_standby_header \
          test_remote_log_format test_ota_policy test_qr_code test_code128 \
-         test_motion
+         test_wifi_scan_list test_motion
 
 SRC_test_hid_keymap    := $(COMP)/scanner/hid_keymap.c
 SRC_test_scanner_line  := $(COMP)/scanner/scanner_line.c
@@ -21,6 +21,7 @@ SRC_test_motor_plan    := $(COMP)/motor/motor_plan.c
 SRC_test_api_sign      := $(COMP)/api/api_sign.c
 SRC_test_api_errors    := $(COMP)/api/api_errors.c
 SRC_test_wifi_policy   := $(COMP)/wifi_mgr/wifi_policy.c
+SRC_test_wifi_scan_list := $(COMP)/wifi_mgr/wifi_scan_list.c
 SRC_test_app_fsm       := ../main/app_fsm.c
 SRC_test_settings_parse := $(COMP)/settings/settings_parse.c
 SRC_test_standby_header := $(COMP)/standby_store/standby_header.c

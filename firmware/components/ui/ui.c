@@ -13,6 +13,7 @@
 #include "ui_image.h"
 #include "ui_input.h"
 #include "ui_theme.h"
+#include "ui_wifi.h"
 
 /*
  * 畫面：白底。一般畫面是標題＋訊息（出球時加進度條）；待機時整頁顯示待機圖；
@@ -48,6 +49,7 @@ typedef enum {
     UI_VIEW_INPUT,     /* 輸入的字＋鍵盤 */
     UI_VIEW_STANDBY,   /* 待機圖（沒有圖時是標題＋訊息） */
     UI_VIEW_MENU,      /* 系統選單：標題＋資訊＋兩顆鍵 */
+    UI_VIEW_WIFI,      /* WiFi 設定（ui_wifi.c） */
 } ui_view_t;
 
 static bool s_ready;
@@ -64,6 +66,31 @@ static void *s_menu_ctx;
 
 static ui_touch_cb_t s_on_touch;
 static void *s_touch_ctx;
+
+static ui_view_t s_view = UI_VIEW_TEXT;
+static bool s_lan_up;
+static bool s_wifi_up;
+static int s_wifi_rssi;
+static char s_wifi_ssid[UI_SSID_MAX];
+
+/*
+ * 右上角：沒有網路而且在待機畫面時顯示「WiFi 設定」鍵（蓋住 "WiFi --"），其他時候顯示網路狀態。
+ * 只在待機畫面顯示：領球流程中按到會打斷交易。呼叫前必須已經拿到 lvgl_port_lock。
+ */
+static void refresh_net_label(void)
+{
+    const bool offline = !s_lan_up && !s_wifi_up;
+    const bool show_button = offline && s_view == UI_VIEW_STANDBY;
+    ui_wifi_set_button_visible(show_button);
+    lv_obj_set_hidden(s_net, show_button);
+    if (s_lan_up) {
+        lv_label_set_text(s_net, "LAN");
+    } else if (s_wifi_up) {
+        lv_label_set_text_fmt(s_net, "%s %d", s_wifi_ssid, s_wifi_rssi);
+    } else {
+        lv_label_set_text(s_net, "WiFi --");
+    }
+}
 
 /* 在 LVGL 工作中執行 */
 static void on_screen_clicked(lv_event_t *e)
@@ -173,6 +200,7 @@ static void build_screen(void)
     build_menu_keys(scr);
     ui_input_build(scr, NULL, NULL);
     ui_scan_build(scr);  /* 在待機圖之後建立：蓋在待機圖上面 */
+    ui_wifi_build(scr);  /* 整頁蓋住待機圖與輸入畫面 */
 
     /* 最後建立：蓋在待機圖與輸入畫面上面 */
     s_net = lv_label_create(scr);
@@ -187,6 +215,8 @@ static void build_screen(void)
     lv_obj_align(s_clock, LV_ALIGN_TOP_LEFT, 16, 12);
     update_clock(NULL);
     lv_timer_create(update_clock, UI_CLOCK_PERIOD_MS, NULL);
+
+    ui_wifi_build_button(scr);  /* 最上層：蓋在網路狀態上面 */
 }
 
 /*
@@ -210,9 +240,12 @@ static bool show_begin(ui_view_t view, const char *title, const char *message)
                  view == UI_VIEW_MENU ? UI_MENU_MESSAGE_Y : UI_MESSAGE_Y);
     ui_input_set_visible(view == UI_VIEW_INPUT);
     ui_scan_set_visible(view == UI_VIEW_STANDBY);
+    ui_wifi_set_visible(view == UI_VIEW_WIFI);
     if (s_standby_image != NULL) {
         lv_obj_set_hidden(s_standby_image, view != UI_VIEW_STANDBY);
     }
+    s_view = view;
+    refresh_net_label();
     return true;
 }
 
@@ -383,23 +416,6 @@ void ui_show_error(const char *message)
     show(UI_VIEW_ERROR, "無法領球", message != NULL ? message : "");
 }
 
-static bool s_lan_up;
-static bool s_wifi_up;
-static int s_wifi_rssi;
-static char s_wifi_ssid[UI_SSID_MAX];
-
-/* 呼叫前必須已經拿到 lvgl_port_lock */
-static void refresh_net_label(void)
-{
-    if (s_lan_up) {
-        lv_label_set_text(s_net, "LAN");
-    } else if (s_wifi_up) {
-        lv_label_set_text_fmt(s_net, "%s %d", s_wifi_ssid, s_wifi_rssi);
-    } else {
-        lv_label_set_text(s_net, "WiFi --");
-    }
-}
-
 void ui_set_wifi_status(bool connected, const char *ssid, int rssi_dbm)
 {
     ESP_LOGI(TAG, "[wifi] %s %d dBm", connected ? "up" : "down", rssi_dbm);
@@ -422,4 +438,50 @@ void ui_set_lan_status(bool connected)
     s_lan_up = connected;
     refresh_net_label();
     lvgl_port_unlock();
+}
+
+void ui_set_wifi_handler(ui_wifi_cb_t on_action, void *ctx)
+{
+    if (s_ready && lvgl_port_lock(UI_LOCK_TIMEOUT_MS)) {
+        ui_wifi_set_handler(on_action, ctx);
+        lvgl_port_unlock();
+    }
+}
+
+void ui_show_wifi_scanning(void)
+{
+    ESP_LOGI(TAG, "[wifi settings] scanning");
+    if (show_begin(UI_VIEW_WIFI, "", "")) {
+        ui_wifi_show_scanning();
+        lvgl_port_unlock();
+    }
+}
+
+void ui_show_wifi_list(const ui_wifi_ap_t *aps, size_t count, const char *message)
+{
+    ESP_LOGI(TAG, "[wifi settings] %u networks%s%s", (unsigned)count, message != NULL ? ": " : "",
+             message != NULL ? message : "");
+    if (show_begin(UI_VIEW_WIFI, "", "")) {
+        ui_wifi_show_list(aps, count, message);
+        lvgl_port_unlock();
+    }
+}
+
+void ui_show_wifi_connecting(const char *ssid)
+{
+    ESP_LOGI(TAG, "[wifi settings] connecting to %s", ssid != NULL ? ssid : "");
+    if (show_begin(UI_VIEW_WIFI, "", "")) {
+        ui_wifi_show_connecting(ssid);
+        lvgl_port_unlock();
+    }
+}
+
+bool ui_wifi_get_selection(char *ssid, size_t ssid_size, char *password, size_t password_size)
+{
+    if (!s_ready || !lvgl_port_lock(UI_LOCK_TIMEOUT_MS)) {
+        return false;
+    }
+    ui_wifi_get_selection_locked(ssid, ssid_size, password, password_size);
+    lvgl_port_unlock();
+    return true;
 }

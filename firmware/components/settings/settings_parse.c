@@ -95,3 +95,24 @@ settings_parse_result_t settings_parse(const char *text, settings_t *out)
     }
     return result;
 }
+
+bool settings_set_primary_wifi(settings_t *s, const char *ssid, const char *password)
+{
+    if (s == NULL || ssid == NULL || ssid[0] == '\0') {
+        return false;
+    }
+    if (password == NULL) {
+        password = "";
+    }
+    if (strlen(ssid) >= sizeof s->wifi1_ssid || strlen(password) >= sizeof s->wifi1_password) {
+        return false;  /* 不截斷：截斷的密碼一定連不上 */
+    }
+    if (strcmp(s->wifi1_ssid, ssid) != 0) {
+        /* 原本的主要 SSID 退成備援；新的和備援同名時等於兩組對調 */
+        memcpy(s->wifi2_ssid, s->wifi1_ssid, sizeof s->wifi2_ssid);
+        memcpy(s->wifi2_password, s->wifi1_password, sizeof s->wifi2_password);
+    }
+    strcpy(s->wifi1_ssid, ssid);
+    strcpy(s->wifi1_password, password);
+    return true;
+}

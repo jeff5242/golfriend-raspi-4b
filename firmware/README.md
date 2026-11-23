@@ -42,6 +42,7 @@ make -C firmware/test_host
 | `test_wifi_policy` | 主要／備援 SSID 切換；回頭試主要 SSID 前先掃描，看不到就留在備援 |
 | `test_app_fsm` | 出球流程狀態轉換、忙碌中不收第二筆 |
 | `test_app_dispense` | 送確認（扣點）前先檢查馬達與出球參數，出不了球就不扣點（Pi 版是先確認再出球） |
+| `test_wifi_scan_list` | WiFi 設定畫面的掃描結果：去掉隱藏 SSID、同名只留最強、依訊號排序；斷線原因分成密碼錯誤／找不到網路 |
 
 ## 裝置建置
 
@@ -56,6 +57,23 @@ idf.py build flash monitor
 
 - 不得把 WiFi 密碼或裝置代碼寫進 `sdkconfig.defaults`。它們只存在 `sdkconfig`，`sdkconfig` 不進 git。
 - 第一次建置成功後，`dependencies.lock` 會記下元件版本，必須 commit。
+
+## WiFi 設定（畫面）
+
+有線與 WiFi 都沒連上時，待機畫面右上角會出現「WiFi 設定」鍵（領球流程中不顯示）。
+
+1. 按下後掃描附近的 WiFi，依訊號由強到弱列出（同名的 AP 只列一次）。
+2. 點需要密碼的網路 → 鍵盤輸入密碼 → 按「連線」或鍵盤上的 ✓；開放網路點了直接連。
+3. 20 秒內拿到 IP 算成功：新網路存成 `wifi1`，原本的 `wifi1` 退成 `wifi2`（備援），存進 NVS，重開機後照用。
+4. 失敗時畫面顯示原因（密碼錯誤／找不到這個 WiFi／連線失敗），WiFi 換回原本存的設定，可以重選或重打密碼。
+5. 設定畫面 60 秒沒有操作就回待機；設定中不收掃碼與維修碼，韌體更新會延後。
+
+限制：
+
+- 字型只收錄韌體字串用到的中文字，SSID 裡的中文字顯示不出來（英數字正常）。
+- 只支援密碼（WPA/WPA2/WPA3-Personal）與開放網路；企業版認證（需要帳號）不列出。
+- 隱藏 SSID 不列出，要用 TF 卡的 `config.txt` 設定。
+- TF 卡留在板子上、而且 `config.txt` 有寫 WiFi 時，每次開機匯入都會蓋掉畫面上設定的 WiFi。
 
 ## 硬體接線（繼電器）
 

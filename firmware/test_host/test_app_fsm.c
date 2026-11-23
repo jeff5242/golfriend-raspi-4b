@@ -125,8 +125,47 @@ static void test_camera_scan_ignored_while_busy(void)
     CHECK(app_fsm_next(APP_ST_SCANNED, APP_EV_UPDATE_START) == APP_ST_SCANNED);
 }
 
+static void test_wifi_settings_open_only_from_standby(void)
+{
+    CHECK(app_fsm_next(APP_ST_STANDBY, APP_EV_WIFI_OPEN) == APP_ST_WIFI);
+    CHECK(app_fsm_next(APP_ST_INPUT, APP_EV_WIFI_OPEN) == APP_ST_INPUT);
+    CHECK(app_fsm_next(APP_ST_QUERY, APP_EV_WIFI_OPEN) == APP_ST_QUERY);
+    CHECK(app_fsm_next(APP_ST_DISPENSE, APP_EV_WIFI_OPEN) == APP_ST_DISPENSE);
+    CHECK(app_fsm_next(APP_ST_MENU, APP_EV_WIFI_OPEN) == APP_ST_MENU);
+}
+
+static void test_wifi_settings_close_and_timeout(void)
+{
+    CHECK(app_fsm_next(APP_ST_WIFI, APP_EV_WIFI_CLOSE) == APP_ST_STANDBY);
+    CHECK(app_fsm_next(APP_ST_WIFI, APP_EV_TIMEOUT) == APP_ST_STANDBY);
+}
+
+static void test_wifi_settings_ignores_other_input(void)
+{
+    const app_event_t ignored[] = {APP_EV_KEY, APP_EV_LINE, APP_EV_SCAN, APP_EV_TOUCH,
+                                   APP_EV_MAINT, APP_EV_UPDATE_START, APP_EV_WIFI_OPEN,
+                                   APP_EV_WIFI_RESCAN, APP_EV_WIFI_SCANNED, APP_EV_WIFI_CONNECT,
+                                   APP_EV_WIFI_ACTIVITY, APP_EV_NET_STATUS};
+    for (size_t i = 0; i < sizeof ignored / sizeof ignored[0]; i++) {
+        CHECK(app_fsm_next(APP_ST_WIFI, ignored[i]) == APP_ST_WIFI);
+    }
+}
+
+static void test_wifi_screen_events_do_not_change_other_states(void)
+{
+    CHECK(app_fsm_next(APP_ST_STANDBY, APP_EV_NET_STATUS) == APP_ST_STANDBY);
+    CHECK(app_fsm_next(APP_ST_INPUT, APP_EV_NET_STATUS) == APP_ST_INPUT);
+    CHECK(app_fsm_next(APP_ST_STANDBY, APP_EV_WIFI_CLOSE) == APP_ST_STANDBY);
+    CHECK(app_fsm_next(APP_ST_STANDBY, APP_EV_WIFI_SCANNED) == APP_ST_STANDBY);
+    CHECK_STR(app_fsm_state_name(APP_ST_WIFI), "WIFI");
+}
+
 int main(void)
 {
+    RUN(test_wifi_settings_open_only_from_standby);
+    RUN(test_wifi_settings_close_and_timeout);
+    RUN(test_wifi_settings_ignores_other_input);
+    RUN(test_wifi_screen_events_do_not_change_other_states);
     RUN(test_happy_path_manual_input);
     RUN(test_scanner_line_from_standby_goes_to_query);
     RUN(test_input_timeout_returns_to_standby);

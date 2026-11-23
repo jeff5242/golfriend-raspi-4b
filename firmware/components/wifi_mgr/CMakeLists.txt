@@ -1,3 +1,3 @@
-idf_component_register(SRCS "wifi_policy.c" "wifi_mgr.c"
+idf_component_register(SRCS "wifi_policy.c" "wifi_scan_list.c" "wifi_mgr.c"
                        INCLUDE_DIRS "include"
                        REQUIRES esp_wifi esp_netif esp_event esp_timer)
