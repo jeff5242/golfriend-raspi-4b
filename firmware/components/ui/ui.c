@@ -35,9 +35,9 @@ static const char *TAG = "ui";
 #define UI_CLOCK_VALID_YEAR  2024  /* 年份小於這個值：還沒對時 */
 #define UI_MENU_MESSAGE_Y    10   /* 選單的資訊有 4 行，位置比一般訊息低，避開標題 */
 #define UI_MENU_TITLE_Y      (-200)
-#define UI_MENU_KEY_WIDTH    300
+#define UI_MENU_KEY_WIDTH    240
 #define UI_MENU_KEY_HEIGHT   90
-#define UI_MENU_KEY_GAP      40
+#define UI_MENU_KEY_GAP      30
 #define UI_MENU_KEY_BOTTOM   (-36)
 #define UI_SSID_MAX          33  /* SSID 最長 32 bytes */
 
@@ -57,7 +57,7 @@ static lv_obj_t *s_net;       /* 右上角網路狀態，永遠在最上層 */
 static lv_obj_t *s_progress;  /* 出球進度條，只在出球畫面顯示 */
 static lv_obj_t *s_standby_image;  /* 沒有待機圖時是 NULL，待機畫面退回文字 */
 
-static lv_obj_t *s_menu_keys;      /* 系統選單的兩顆鍵 */
+static lv_obj_t *s_menu_keys;      /* 系統選單的三顆鍵 */
 static ui_menu_cb_t s_on_menu;
 static void *s_menu_ctx;
 
@@ -105,11 +105,12 @@ static void build_menu_keys(lv_obj_t *scr)
 {
     s_menu_keys = lv_obj_create(scr);
     lv_obj_remove_style_all(s_menu_keys);
-    lv_obj_set_size(s_menu_keys, 2 * UI_MENU_KEY_WIDTH + UI_MENU_KEY_GAP, UI_MENU_KEY_HEIGHT);
+    lv_obj_set_size(s_menu_keys, 3 * UI_MENU_KEY_WIDTH + 2 * UI_MENU_KEY_GAP, UI_MENU_KEY_HEIGHT);
     lv_obj_align(s_menu_keys, LV_ALIGN_BOTTOM_MID, 0, UI_MENU_KEY_BOTTOM);
     lv_obj_set_flex_flow(s_menu_keys, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(s_menu_keys, UI_MENU_KEY_GAP, 0);
     add_menu_key("返回", UI_MENU_CLOSE, UI_COLOR_KEY, UI_COLOR_KEY_DOWN, UI_COLOR_TEXT);
+    add_menu_key("檢查更新", UI_MENU_UPDATE, UI_COLOR_KEY, UI_COLOR_KEY_DOWN, UI_COLOR_ACCENT);
     add_menu_key("重新開機", UI_MENU_REBOOT, UI_COLOR_DELETE, UI_COLOR_DELETE_DOWN,
                  UI_COLOR_DELETE_TEXT);
     lv_obj_set_hidden(s_menu_keys, true);

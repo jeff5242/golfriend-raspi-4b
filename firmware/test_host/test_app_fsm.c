@@ -85,6 +85,22 @@ static void test_maintenance_code_opens_menu(void)
     CHECK_STR(app_fsm_state_name(APP_ST_MENU), "MENU");
 }
 
+static void test_update_only_from_standby(void)
+{
+    /* 韌體更新只在待機時開始；更新中不接受任何輸入；失敗回待機（成功時直接重開機） */
+    CHECK(app_fsm_next(APP_ST_STANDBY, APP_EV_UPDATE_START) == APP_ST_UPDATE);
+    CHECK(app_fsm_next(APP_ST_INPUT, APP_EV_UPDATE_START) == APP_ST_INPUT);
+    CHECK(app_fsm_next(APP_ST_QUERY, APP_EV_UPDATE_START) == APP_ST_QUERY);
+    CHECK(app_fsm_next(APP_ST_CONFIRM, APP_EV_UPDATE_START) == APP_ST_CONFIRM);
+    CHECK(app_fsm_next(APP_ST_DISPENSE, APP_EV_UPDATE_START) == APP_ST_DISPENSE);
+    CHECK(app_fsm_next(APP_ST_UPDATE, APP_EV_LINE) == APP_ST_UPDATE);
+    CHECK(app_fsm_next(APP_ST_UPDATE, APP_EV_KEY) == APP_ST_UPDATE);
+    CHECK(app_fsm_next(APP_ST_UPDATE, APP_EV_TOUCH) == APP_ST_UPDATE);
+    CHECK(app_fsm_next(APP_ST_UPDATE, APP_EV_MAINT) == APP_ST_UPDATE);
+    CHECK(app_fsm_next(APP_ST_UPDATE, APP_EV_UPDATE_END) == APP_ST_STANDBY);
+    CHECK_STR(app_fsm_state_name(APP_ST_UPDATE), "UPDATE");
+}
+
 int main(void)
 {
     RUN(test_happy_path_manual_input);
@@ -95,6 +111,7 @@ int main(void)
     RUN(test_input_ignored_while_busy);
     RUN(test_touch_opens_input_only_from_standby);
     RUN(test_maintenance_code_opens_menu);
+    RUN(test_update_only_from_standby);
     RUN(test_state_names);
     return TEST_SUMMARY();
 }

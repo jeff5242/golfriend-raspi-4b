@@ -8,6 +8,23 @@ menu "Golfriend Ball Dispenser"
         string "API base URL"
         default "http://golfpoint.milkidea.com/api"
 
+    config GOLF_LOG_TOKEN
+        string "Better Stack (Logtail) source token; empty = remote log off. Never commit"
+        default ""
+
+    config GOLF_OTA_URL
+        string "OTA manifest URL (https://.../manifest.json); empty = OTA off"
+        default ""
+
+    config GOLF_OTA_CHECK_INTERVAL_H
+        int "OTA check interval in hours"
+        range 1 168
+        default 6
+
+    config GOLF_OTA_ALLOW_HTTP
+        bool "Allow plain http:// for OTA (development only, never in production)"
+        default n
+
     config GOLF_PING_INTERVAL_S
         int "Status report (take_ball_ping) interval in seconds"
         range 10 3600

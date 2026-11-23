@@ -40,10 +40,11 @@ void ui_show_confirm(int take, long point_before, long point_after);
 /* 出球進度：第 done 盤 / 共 total 盤 */
 void ui_show_dispensing(unsigned done, unsigned total);
 
-/* 系統選單（維修用）：顯示 info（多行文字）與「返回」「重新開機」兩顆鍵 */
+/* 系統選單（維修用）：顯示 info（多行文字）與「返回」「檢查更新」「重新開機」三顆鍵 */
 typedef enum {
     UI_MENU_CLOSE = 0,
     UI_MENU_REBOOT,
+    UI_MENU_UPDATE,  /* 檢查韌體更新 */
 } ui_menu_action_t;
 typedef void (*ui_menu_cb_t)(ui_menu_action_t action, void *ctx);
 

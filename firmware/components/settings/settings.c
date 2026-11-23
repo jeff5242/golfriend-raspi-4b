@@ -22,7 +22,8 @@ typedef struct {
 
 static const field_t s_fields[] = {
     FIELD(device_code), FIELD(wifi1_ssid), FIELD(wifi1_password),
-    FIELD(wifi2_ssid),  FIELD(wifi2_password),
+    FIELD(wifi2_ssid),  FIELD(wifi2_password), FIELD(log_token),
+    FIELD(ota_url),
 };
 #define FIELD_COUNT (sizeof s_fields / sizeof s_fields[0])
 
@@ -38,6 +39,8 @@ static void load_defaults(settings_t *out)
     snprintf(out->wifi1_password, sizeof out->wifi1_password, "%s", CONFIG_GOLF_WIFI1_PASSWORD);
     snprintf(out->wifi2_ssid, sizeof out->wifi2_ssid, "%s", CONFIG_GOLF_WIFI2_SSID);
     snprintf(out->wifi2_password, sizeof out->wifi2_password, "%s", CONFIG_GOLF_WIFI2_PASSWORD);
+    snprintf(out->log_token, sizeof out->log_token, "%s", CONFIG_GOLF_LOG_TOKEN);
+    snprintf(out->ota_url, sizeof out->ota_url, "%s", CONFIG_GOLF_OTA_URL);
 }
 
 void settings_load(settings_t *out)

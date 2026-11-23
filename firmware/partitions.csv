@@ -1,8 +1,12 @@
-# 16 MB Flash。加入 LVGL 後 app 超過內建「單一大 app」分割表的 1.5 MB，改用自訂分割表。
-# 加 OTA 時改成 ota_0／ota_1 兩個 app 分割區。
-# Name,   Type, SubType, Offset,  Size
-nvs,      data, nvs,     0x9000,  0x6000
-phy_init, data, phy,     0xf000,  0x1000
-factory,  app,  factory, 0x10000, 0x600000
+# 16 MB Flash。兩個 app 分割區（ota_0／ota_1）給韌體遠端更新用：
+# 新版下載到沒在用的那一個，開機失敗時 bootloader 退回另一個。
+# 改這個檔案後必須用 USB 重新燒錄一次（idf.py flash 會一起燒分割表）。
+# nvs 的位置不得移動：現場設定存在裡面。
+# Name,   Type, SubType, Offset,   Size
+nvs,      data, nvs,     0x9000,   0x6000
+otadata,  data, ota,     0xf000,   0x2000
+phy_init, data, phy,     0x11000,  0x1000
+ota_0,    app,  ota_0,   0x20000,  0x600000
+ota_1,    app,  ota_1,   0x620000, 0x600000
 # 各場館待機圖（TF 卡的 standby.jpg 匯入到這裡）。子類型 0x40 是自訂值。
-standby,  data, 0x40,    0x610000, 0x100000
+standby,  data, 0x40,    0xc20000, 0x100000

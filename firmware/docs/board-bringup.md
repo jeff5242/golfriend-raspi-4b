@@ -193,7 +193,8 @@ menuconfig 的項目都在「Golfriend Ball Dispenser」選單：
 
 - 晶片：IP101（RMII）。腳位和 ESP-IDF 給 ESP32-P4 的預設值相同：MDC 31、MDIO 52、TX_EN 49、TXD0 34、TXD1 35、CRS_DV 28、RXD0 29、RXD1 30、時脈 GPIO50（外部輸入）、PHY 重置 GPIO51。
 - 已驗證：開機 log 出現 `ethernet attached to netif` 與 `eth_mgr: started`（驅動從 MDIO 讀到 IP101）。
-- 未驗證：插網路線後拿到 IP、有線優先、拔線後改走 WiFi。通過條件：log 出現 `eth_mgr: got ip`，狀態列顯示 `LAN`；拔線後狀態列回到 `WiFi`。
+- 已驗證（2026-11-23）：插網路線後由 DHCP 拿到 IP，狀態列顯示 `LAN`，定期回報改從有線的 IP 送出（後台回 200）。
+- 已驗證（2026-11-23）：拔線後自動改走 WiFi，狀態列回到 WiFi 名稱，回報的 IP 變回 WiFi 的 IP，後台回 200。
 - 規則：有線有 IP 就走有線（預設路由優先度 200，WiFi 100）。WiFi 同時保持連線當備援。
 - 沒插網路線時，開機多等約 4 秒（PHY 自動協商逾時）。
 
@@ -203,7 +204,7 @@ menuconfig 的項目都在「Golfriend Ball Dispenser」選單：
 
 | 檔案 | 內容 | 存到哪裡 |
 |---|---|---|
-| `config.txt` | 一行一項 `key=value`：`device_code`、`wifi1_ssid`、`wifi1_password`、`wifi2_ssid`、`wifi2_password`。`#` 開頭是註解。沒寫的項目維持原值 | NVS |
+| `config.txt` | 一行一項 `key=value`：`device_code`、`wifi1_ssid`、`wifi1_password`、`wifi2_ssid`、`wifi2_password`、`log_token`、`ota_url`。`#` 開頭是註解。沒寫的項目維持原值 | NVS |
 | `standby.jpg` | 待機圖：1024×600、baseline JPEG（不是 progressive）、小於 1 MB | Flash 的 `standby` 分割區 |
 
 - 匯入成功時，螢幕顯示「記憶卡」與匯入結果 3 秒。之後可以取出卡片，設定留在板子裡。
@@ -212,6 +213,52 @@ menuconfig 的項目都在「Golfriend Ball Dispenser」選單：
 - 輸入維修碼 `7777777` 開系統選單，可以看到目前的裝置代碼、版本、網路、IP。
 - 已驗證：沒插卡時開機正常。未驗證：實際從卡片匯入。TF 卡的 IO 電源用晶片內建 LDO 通道 4，這是推論（廠商檔案寫通道 3，但通道 3 是螢幕用的），第一次插卡時確認。
 - `config.txt` 有 WiFi 密碼。匯入後請把卡片收好或刪除檔案。
+
+### 4.5 遠端 log（2026-11-23）
+
+- 板子把重要事件送到 Better Stack（Logtail），欄位與 Pi 版 `log.py` 相同：`dt`、`level`、`message`（`[裝置] [標籤] 內容`）、`device`、`tag`。所以可以用同一個儀表板查 Pi 與 ESP32。
+- 送出的事件：開機（版本、重置原因）、WiFi／有線連線變化、`take_ball` 成功與失敗（含領球碼與錯誤代碼）、扣點確認、出球開始／完成／中斷、從系統選單重開機。
+- 每 5 秒送一批，一批最多 20 筆。送不出去時重試約 30 秒，之後丟掉那一批；不影響領球。
+- token：TF 卡 `config.txt` 的 `log_token=`，或 menuconfig 的 `GOLF_LOG_TOKEN`（存在 `sdkconfig`，不進 git）。沒有 token 時不送。不得把 token 寫進程式碼或文件。
+- 已驗證：Better Stack 查得到 `TEST_0010` 的開機與 WiFi 事件。
+
+### 4.6 韌體遠端更新 OTA（2026-11-23）
+
+**運作方式**
+
+- 分割表有兩個 app 分割區（`ota_0`、`ota_1`）。新版下載到沒在用的那一個，重開機後執行。
+- 板子開機後第一次成功回報後台，才開始檢查更新；之後每 6 小時檢查一次（`GOLF_OTA_CHECK_INTERVAL_H`）。系統選單（維修碼 `7777777`）的「檢查更新」可以立刻檢查。
+- 只在待機時更新。有人在領球時延後 10 分鐘。更新中畫面顯示「系統更新中，請勿關閉電源」，不接受輸入。
+- 只升級，不降版；機型代號不同（不是 `P4-`）的韌體不裝。
+- 下載網址必須是 `https://`。
+
+**退回機制**
+
+- 新版第一次開機是「待確認」。它成功回報後台（`take_ball_ping` 回 200）後才標記為正常。
+- 在那之前重開機（當機、斷電、連不上後台後被重開），bootloader 會退回上一版。
+- 被退回的版本號會記住，不再下載。修正後必須用新的版本號發布。
+
+**發布新版的步驟**
+
+1. 改 `firmware/CMakeLists.txt` 的 `PROJECT_VER`（格式 `P4-主.次.修`，數字只能變大）。
+2. `idf.py build`，取出 `build/golfriend_p4.bin`。
+3. 把 `.bin` 放到 HTTPS 伺服器。
+4. 更新同一台伺服器上的版本說明檔：`{"version":"P4-0.1.2","url":"https://.../golfriend_p4.bin"}`。
+5. 先讓一台測試機更新並確認正常，再放給其他場館。版本說明檔一改，所有板子都會在 6 小時內更新。
+
+板子要知道版本說明檔的網址：TF 卡 `config.txt` 的 `ota_url=`，或 menuconfig 的 `GOLF_OTA_URL`。沒設定時不做遠端更新。
+
+**第一次改用這個分割表時必須用 USB 燒錄一次**（`idf.py flash`）。NVS 的位置沒變，現場設定會保留；待機圖分割區的位置變了，要重新匯入 `standby.jpg`。
+
+**已驗證（實機，測試伺服器是區域網路上的電腦）**
+
+| 情境 | 結果 |
+|---|---|
+| 0.1.0 → 0.1.1 自動更新 | 下載約 15 秒，重開後執行新版，回報後台後 `new version confirmed` |
+| 0.1.2 開機後、回報後台前被重置 | bootloader 退回 0.1.1 |
+| 退回後再檢查更新 | `P4-0.1.2 failed to start before and was rolled back: not downloading again` |
+
+未驗證：從正式的 HTTPS 伺服器下載（還沒有決定放在哪裡）。
 
 ## 5. 升級 C6 韌體（不能保證還原，最後才做）
 

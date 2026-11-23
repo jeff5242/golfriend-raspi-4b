@@ -93,6 +93,13 @@ static void test_null_arguments(void)
     CHECK(settings_parse("", &s).applied == 0);
 }
 
+static void test_log_token(void)
+{
+    settings_t s = defaults();
+    CHECK(settings_parse("log_token=abcDEF123\n", &s).applied == 1);
+    CHECK_STR(s.log_token, "abcDEF123");
+}
+
 int main(void)
 {
     RUN(test_parses_all_keys);
@@ -101,6 +108,7 @@ int main(void)
     RUN(test_empty_value_clears_item);
     RUN(test_rejects_bad_lines_without_touching_values);
     RUN(test_longest_allowed_value_fits);
+    RUN(test_log_token);
     RUN(test_null_arguments);
     return TEST_SUMMARY();
 }

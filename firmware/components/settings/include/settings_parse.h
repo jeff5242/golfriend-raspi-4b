@@ -6,6 +6,8 @@
  *   device_code=TGSGF_1F_M1
  *   wifi1_ssid=...        wifi1_password=...
  *   wifi2_ssid=...        wifi2_password=...     （備援，可以不寫）
+ *   log_token=...         （Better Stack 的 token，可以不寫）
+ *   ota_url=https://...   （韌體更新的版本說明檔，可以不寫）
  * 沒寫的項目維持原值，所以可以只改其中一項。
  */
 #include <stdbool.h>
@@ -18,6 +20,8 @@ extern "C" {
 #define SETTINGS_DEVICE_CODE_MAX 48
 #define SETTINGS_SSID_MAX        33  /* SSID 最長 32 bytes */
 #define SETTINGS_PASSWORD_MAX    65  /* WPA2 密碼最長 64 bytes */
+#define SETTINGS_LOG_TOKEN_MAX   64
+#define SETTINGS_OTA_URL_MAX     160
 
 typedef struct {
     char device_code[SETTINGS_DEVICE_CODE_MAX];
@@ -25,6 +29,8 @@ typedef struct {
     char wifi1_password[SETTINGS_PASSWORD_MAX];
     char wifi2_ssid[SETTINGS_SSID_MAX];
     char wifi2_password[SETTINGS_PASSWORD_MAX];
+    char log_token[SETTINGS_LOG_TOKEN_MAX];  /* Better Stack token；空字串＝不送遠端 log */
+    char ota_url[SETTINGS_OTA_URL_MAX];  /* 版本說明檔的網址；空字串＝不做遠端更新 */
 } settings_t;
 
 typedef struct {

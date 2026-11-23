@@ -110,6 +110,7 @@ static void run_command(int c)
     case 'h': ui_show_confirm(50, 999999, 999999); break;
     case 'd': ui_show_dispensing(1, 3); break;
     case 'm': ui_show_menu("裝置 TEST_0001\n版本 P4-0.1.0\n網路 有線\nIP 192.168.1.20"); break;
+    case 'u': ui_show_notice("系統更新中", "請勿關閉電源\n完成後會自動重新開機"); break;
     case 'e': ui_show_error("領球碼過期，請重新產生"); break;
     default: return;  /* 換行與其他字元都略過 */
     }

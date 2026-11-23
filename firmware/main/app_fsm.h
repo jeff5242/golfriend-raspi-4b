@@ -9,6 +9,7 @@
  *   查詢／確認 --失敗或逾時--> 錯誤 --顯示完--> 待機
  *   出球 --馬達無法啟動--> 錯誤
  *   待機／輸入 --維修碼--> 系統選單 --返回或逾時--> 待機
+ *   待機 --找到新版--> 更新中 --失敗--> 待機（成功時重開機）
  */
 
 #ifdef __cplusplus
@@ -23,6 +24,7 @@ typedef enum {
     APP_ST_DISPENSE,
     APP_ST_ERROR,
     APP_ST_MENU,     /* 系統選單（維修碼開啟） */
+    APP_ST_UPDATE,   /* 韌體更新中 */
 } app_state_t;
 
 typedef enum {
@@ -38,6 +40,8 @@ typedef enum {
     APP_EV_TOUCH,        /* 點了待機畫面（開啟觸控鍵盤） */
     APP_EV_MAINT,        /* 輸入了維修碼 */
     APP_EV_MENU_CLOSE,   /* 系統選單按了「返回」 */
+    APP_EV_UPDATE_START, /* 找到新版韌體，要開始下載 */
+    APP_EV_UPDATE_END,   /* 更新失敗或取消（成功時直接重開機） */
 } app_event_t;
 
 /* 回傳下一個狀態。沒有定義的組合維持原狀態。 */

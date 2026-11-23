@@ -92,7 +92,8 @@ static esp_err_t on_http_event(esp_http_client_event_t *evt)
 }
 
 /* 後台拒絕時印出完整回應與兩邊的時間：錯誤代碼 2（timeout）要靠這個判斷是不是時鐘問題 */
-static void log_rejection(const char *path, int status, const char *resp, const char *server_date)
+static void log_rejection(const char *path, int status, const char *body, const char *resp,
+                          const char *server_date)
 {
     char device_date[API_DATE_MAX];
     const time_t now = time(NULL);
@@ -100,6 +101,7 @@ static void log_rejection(const char *path, int status, const char *resp, const 
     gmtime_r(&now, &tm_utc);
     strftime(device_date, sizeof device_date, "%a, %d %b %Y %H:%M:%S GMT", &tm_utc);
     ESP_LOGW(TAG, "%s rejected (%d): %s", path, status, resp);
+    ESP_LOGW(TAG, "  request: %s", body);  /* 給後台查詢用：含裝置代碼、領球碼、time、sn */
     ESP_LOGW(TAG, "  server time: %s", server_date[0] != '\0' ? server_date : "(no Date header)");
     ESP_LOGW(TAG, "  device time: %s", device_date);
 }
@@ -146,7 +148,7 @@ static esp_err_t post_form(const char *path, const char *body, char *resp, size_
         resp[total] = '\0';
         ESP_LOGI(TAG, "POST %s -> %d, %d bytes", path, status, total);
         if (status != 200) {
-            log_rejection(path, status, resp, server_date);
+            log_rejection(path, status, body, resp, server_date);
         }
         if (status != 200 && status != 400) {
             err = ESP_ERR_INVALID_RESPONSE;

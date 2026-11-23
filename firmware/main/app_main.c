@@ -29,6 +29,8 @@
 #include "motor.h"
 #include "motor_plan.h"
 #include "nvs_flash.h"
+#include "ota.h"
+#include "remote_log.h"
 #include "scanner.h"
 #include "settings.h"
 #include "standby_store.h"
@@ -39,17 +41,30 @@
 
 static const char *TAG = "app";
 
+/* 遠端 log 的簡寫：系統／操作／例外，對應 Pi 版 Log.system()／operation()／exception() */
+#define RLOG_SYSTEM(...)    remote_log_event(REMOTE_LOG_SYSTEM, "INFO", __VA_ARGS__)
+#define RLOG_OPERATION(...) remote_log_event(REMOTE_LOG_OPERATION, "INFO", __VA_ARGS__)
+#define RLOG_EXCEPTION(...) remote_log_event(REMOTE_LOG_EXCEPTION, "ERROR", __VA_ARGS__)
+
 #define INPUT_TIMEOUT_MS 10000  /* 同 Pi 版 TakeBallDialog 10 秒 */
 #define CONFIRM_DELAY_MS 2000   /* 同 Pi 版 QR 路徑 2 秒自動確認 */
 #define ERROR_SHOW_MS    3000
 #define MENU_TIMEOUT_MS   30000  /* 系統選單沒有操作 30 秒後回待機 */
 #define MAINT_CODE        "7777777"  /* 同 Pi 版的維修碼；Pi 版是關機，MCU 版開系統選單 */
 #define MENU_REBOOT_TEXT  "reboot"
+#define MENU_UPDATE_TEXT  "update"
+#define OTA_TASK_STACK    8192
+#define OTA_URL_MAX       200
+#define OTA_VERSION_MAX   24
+#define OTA_ENTER_WAIT_MS 2000   /* 等流程進入「更新中」；進不去代表有人正在領球 */
+#define OTA_BUSY_RETRY_MS 600000 /* 有人在領球時，10 分鐘後再試 */
+#define OTA_WAIT_PING_MS  5000
 #define MENU_INFO_MAX     192
 #define CONFIG_FILE_PATH  TFCARD_MOUNT_POINT "/config.txt"
 #define STANDBY_FILE_PATH TFCARD_MOUNT_POINT "/standby.jpg"
 #define NOTICE_MAX        128
 #define NOTICE_SHOW_MS    3000
+#define REBOOT_FLUSH_MS   7000  /* 遠端 log 每 5 秒送一批 */
 #define APP_QUEUE_LEN    16
 #define ERROR_TEXT_MAX   64
 #define API_CODE_MAX     16
@@ -69,6 +84,9 @@ static char s_code[SCANNER_LINE_MAX];
 static api_take_ball_result_t s_result;
 static motor_plan_t s_plan;
 static char s_error[ERROR_TEXT_MAX];
+static TaskHandle_t s_ota_task;
+static volatile bool s_backend_ok;     /* 這次開機有沒有成功回報過後台 */
+static volatile bool s_ota_manual;     /* 從系統選單按「檢查更新」：結果要顯示在畫面上 */
 static settings_t s_settings;  /* 開機時讀一次；改設定後重開機生效 */
 
 /* ---- 回呼：只丟佇列，不做事 ------------------------------------------- */
@@ -112,7 +130,9 @@ static void on_ui_key(char c, void *ctx)
 static void on_ui_menu(ui_menu_action_t action, void *ctx)
 {
     (void)ctx;
-    post(APP_EV_MENU_CLOSE, action == UI_MENU_REBOOT ? MENU_REBOOT_TEXT : NULL);
+    post(APP_EV_MENU_CLOSE, action == UI_MENU_REBOOT   ? MENU_REBOOT_TEXT
+                            : action == UI_MENU_UPDATE ? MENU_UPDATE_TEXT
+                                                       : NULL);
 }
 
 static void on_motor_done(esp_err_t result, void *ctx)
@@ -122,6 +142,7 @@ static void on_motor_done(esp_err_t result, void *ctx)
         post(APP_EV_DISPENSE_FAIL, "出球中斷，請洽櫃台");  /* 交易已確認，球沒出完 */
         return;
     }
+    RLOG_OPERATION("dispense done");
     post(APP_EV_MOTOR_DONE, NULL);
 }
 
@@ -146,6 +167,7 @@ static void on_wifi_status(bool connected, int ap_index, void *ctx)
 {
     (void)ctx;
     ESP_LOGI(TAG, "wifi %s (ap %d)", connected ? "up" : "down", ap_index);
+    RLOG_SYSTEM("wifi %s (ap %d, rssi %d)", connected ? "up" : "down", ap_index, wifi_mgr_rssi());
     on_net_changed();
 }
 
@@ -153,6 +175,7 @@ static void on_eth_status(bool connected, void *ctx)
 {
     (void)ctx;
     ESP_LOGI(TAG, "ethernet %s", connected ? "up" : "down");
+    RLOG_SYSTEM("ethernet %s", connected ? "up" : "down");
     on_net_changed();
 }
 
@@ -190,10 +213,82 @@ static void ping_task(void *arg)
         const esp_err_t err = api_ping(note, code, sizeof code);
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "ping ok: %s", note);
+            /* 新版韌體第一次成功連到後台：確認這一版正常，取消退回 */
+            if (ota_is_pending_verify()) {
+                ota_confirm_running();
+                RLOG_SYSTEM("ota: version %s confirmed", esp_app_get_description()->version);
+            }
+            s_backend_ok = true;
         } else {
             ESP_LOGW(TAG, "ping failed: %s code=%s", esp_err_to_name(err), code);
         }
         vTaskDelay(pdMS_TO_TICKS(CONFIG_GOLF_PING_INTERVAL_S * 1000));
+    }
+}
+
+/* ---- 韌體遠端更新 ------------------------------------------------------ */
+
+static void ota_show_result(const char *message)
+{
+    if (!s_ota_manual) {
+        return;
+    }
+    ui_show_notice("韌體更新", message);
+    vTaskDelay(pdMS_TO_TICKS(NOTICE_SHOW_MS));
+    if (s_state == APP_ST_STANDBY) {
+        ui_show_standby();
+    }
+}
+
+/* 檢查一次；有新版而且機器閒著就更新。回傳下次檢查前要等多久。 */
+static TickType_t ota_run_once(void)
+{
+    const TickType_t normal = pdMS_TO_TICKS(CONFIG_GOLF_OTA_CHECK_INTERVAL_H * 3600 * 1000);
+    char url[OTA_URL_MAX];
+    char version[OTA_VERSION_MAX];
+    if (active_link() == APP_NET_NONE) {
+        ota_show_result("沒有網路");
+        return normal;
+    }
+    const esp_err_t check = ota_check(s_settings.ota_url, url, sizeof url, version, sizeof version);
+    if (check != ESP_OK) {
+        ota_show_result(check == ESP_ERR_NOT_FOUND ? "已是最新版本" : "無法檢查更新");
+        return normal;
+    }
+    post(APP_EV_UPDATE_START, version);
+    vTaskDelay(pdMS_TO_TICKS(OTA_ENTER_WAIT_MS));
+    if (s_state != APP_ST_UPDATE) {
+        ESP_LOGI(TAG, "ota: machine busy, retry later");
+        return pdMS_TO_TICKS(OTA_BUSY_RETRY_MS);
+    }
+    RLOG_SYSTEM("ota: downloading %s", version);
+    if (ota_download(url) != ESP_OK) {
+        RLOG_EXCEPTION("ota: download of %s failed", version);
+        post(APP_EV_UPDATE_END, NULL);
+        return normal;
+    }
+    RLOG_SYSTEM("ota: %s downloaded, rebooting", version);
+    vTaskDelay(pdMS_TO_TICKS(REBOOT_FLUSH_MS));
+    esp_restart();
+    return normal;
+}
+
+/*
+ * 開機後等第一次成功回報後台才開始檢查（確定網路與時間都正常）。
+ * 之後每隔 GOLF_OTA_CHECK_INTERVAL_H 小時檢查一次；系統選單的「檢查更新」會立刻叫醒它。
+ */
+static void ota_task(void *arg)
+{
+    (void)arg;
+    while (!s_backend_ok) {
+        vTaskDelay(pdMS_TO_TICKS(OTA_WAIT_PING_MS));
+    }
+    for (;;) {
+        const TickType_t wait = ota_run_once();
+        s_ota_manual = false;
+        if (ulTaskNotifyTake(pdTRUE, wait) > 0) {
+            s_ota_manual = true;
+        }
     }
 }
 
@@ -221,6 +316,8 @@ static bool prepare_dispense(void)
     }
     ESP_LOGE(TAG, "not confirming id=%s: check=%d type=%d take=%d", s_result.id, (int)check,
              s_result.type, s_result.take);
+    RLOG_EXCEPTION("not confirming id=%s: check=%d type=%d take=%d", s_result.id, (int)check,
+                   s_result.type, s_result.take);
     set_error(check == APP_DISPENSE_MOTOR_NOT_READY ? "出球機未就緒，請洽櫃台"
                                                     : "出球設定錯誤，請洽櫃台");
     return false;
@@ -237,10 +334,14 @@ static app_event_t do_query(void)
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "take_ball ok: id=%s take=%d type=%d", s_result.id, s_result.take,
                  s_result.type);
+        RLOG_OPERATION("take_ball ok: code=%s id=%s take=%d type=%d", s_code, s_result.id,
+                       s_result.take, s_result.type);
         return prepare_dispense() ? APP_EV_API_OK : APP_EV_API_FAIL;
     }
     /* 螢幕還沒接上時，只能從 log 看伺服器回了什麼錯誤代碼 */
     ESP_LOGW(TAG, "take_ball failed: %s code=%s", esp_err_to_name(err), code);
+    RLOG_EXCEPTION("take_ball failed: code=%s err=%s error_msg=%s", s_code, esp_err_to_name(err),
+                   code);
     set_error(api_failure_text(API_CMD_TAKE_BALL, err == ESP_FAIL, code));
     return APP_EV_API_FAIL;
 }
@@ -253,8 +354,11 @@ static app_event_t do_confirm(void)
     snprintf(note, sizeof note, "takeBall%d", s_result.take);  /* 同 Pi 版 note 格式 */
     const esp_err_t err = api_take_ball_confirm(s_result.id, note, "1", code, sizeof code);
     if (err == ESP_OK) {
+        RLOG_OPERATION("take_ball_confirm ok: id=%s take=%d", s_result.id, s_result.take);
         return APP_EV_CONFIRM_OK;
     }
+    RLOG_EXCEPTION("take_ball_confirm failed: id=%s err=%s error_msg=%s", s_result.id,
+                   esp_err_to_name(err), code);
     ESP_LOGW(TAG, "take_ball_confirm failed: %s code=%s id=%s", esp_err_to_name(err), code,
              s_result.id);
     set_error(api_failure_text(API_CMD_TAKE_BALL_CONFIRM, err == ESP_FAIL, code));
@@ -270,8 +374,12 @@ static bool do_dispense(void)
         ESP_LOGE(TAG, "cannot dispense: %s id=%s take=%d", esp_err_to_name(err), s_result.id,
                  s_result.take);
         set_error("出球失敗，請洽櫃台");
+        RLOG_EXCEPTION("cannot dispense: %s id=%s take=%d", esp_err_to_name(err), s_result.id,
+                       s_result.take);
         return false;
     }
+    RLOG_OPERATION("dispense start: id=%s take=%d pulses=%u", s_result.id, s_result.take,
+                   (unsigned)s_plan.pulses);
     ui_show_dispensing(0, s_plan.pulses);  /* TODO：motor 每盤完成時回報進度 */
     return true;
 }
@@ -321,6 +429,9 @@ static bool enter_state(app_state_t state, app_event_t *follow)
     case APP_ST_MENU:
         show_menu();
         return false;
+    case APP_ST_UPDATE:
+        ui_show_notice("系統更新中", "請勿關閉電源\n完成後會自動重新開機");
+        return false;
     }
     return false;
 }
@@ -360,10 +471,17 @@ static void handle_event(app_event_t event, const app_msg_t *msg)
             if (msg->event == APP_EV_MENU_CLOSE && s_state == APP_ST_MENU &&
                 strcmp(msg->text, MENU_REBOOT_TEXT) == 0) {
                 ESP_LOGW(TAG, "reboot from system menu");
+                RLOG_SYSTEM("reboot from system menu");
+                vTaskDelay(pdMS_TO_TICKS(REBOOT_FLUSH_MS));  /* 讓這一筆送出去 */
                 esp_restart();
+            }
+            if (msg->event == APP_EV_MENU_CLOSE && s_state == APP_ST_MENU &&
+                strcmp(msg->text, MENU_UPDATE_TEXT) == 0 && s_ota_task != NULL) {
+                xTaskNotifyGive(s_ota_task);  /* 選單照常關閉，結果由更新工作顯示 */
             }
             if (msg->event == APP_EV_DISPENSE_FAIL && s_state == APP_ST_DISPENSE) {
                 ESP_LOGE(TAG, "dispense aborted id=%s take=%d", s_result.id, s_result.take);
+                RLOG_EXCEPTION("dispense aborted id=%s take=%d", s_result.id, s_result.take);
                 set_error(msg->text);
             }
         }
@@ -457,6 +575,12 @@ void app_main(void)
     char card_notice[NOTICE_MAX];
     import_from_card(card_notice, sizeof card_notice);
 
+    if (remote_log_start(s_settings.log_token, s_settings.device_code) != ESP_OK) {
+        ESP_LOGE(TAG, "remote log disabled");
+    }
+    RLOG_SYSTEM("boot: version %s, reset reason %d%s", esp_app_get_description()->version,
+                (int)esp_reset_reason(), ota_is_pending_verify() ? ", pending verify" : "");
+
     ESP_ERROR_CHECK(ui_init());
     ui_set_input_handlers(on_ui_touch, on_ui_key, NULL);
     ui_set_menu_handler(on_ui_menu, NULL);
@@ -485,6 +609,12 @@ void app_main(void)
 
     if (xTaskCreate(ping_task, "ping", PING_TASK_STACK, NULL, 3, NULL) != pdPASS) {
         ESP_LOGE(TAG, "status report disabled");
+    }
+
+    if (s_settings.ota_url[0] == '\0') {
+        ESP_LOGI(TAG, "ota off (no ota_url)");
+    } else if (xTaskCreate(ota_task, "ota", OTA_TASK_STACK, NULL, 2, &s_ota_task) != pdPASS) {
+        ESP_LOGE(TAG, "ota disabled");
     }
 
     app_event_t unused;

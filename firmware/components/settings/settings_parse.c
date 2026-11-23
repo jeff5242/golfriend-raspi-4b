@@ -12,7 +12,8 @@ typedef struct {
 
 static const field_t s_fields[] = {
     FIELD(device_code), FIELD(wifi1_ssid), FIELD(wifi1_password),
-    FIELD(wifi2_ssid),  FIELD(wifi2_password),
+    FIELD(wifi2_ssid),  FIELD(wifi2_password), FIELD(log_token),
+    FIELD(ota_url),
 };
 
 static bool is_space(char c)

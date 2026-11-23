@@ -21,6 +21,7 @@ SOURCE_GLOBS = ("main/*.c", "main/*.h", "components/*/*.c", "components/*/*.h",
 SIZES = (24, 32, 56)
 ASCII_RANGE = "0x20-0x7E"
 STRING_LITERAL = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)  # 註解裡的字不會顯示在畫面上
 CHARS_MARK = "/* chars: "
 
 
@@ -31,7 +32,7 @@ def used_chars():
         for path in ROOT.glob(pattern):
             if OUT_DIR in path.parents:
                 continue
-            for literal in STRING_LITERAL.findall(path.read_text(encoding="utf-8")):
+            for literal in STRING_LITERAL.findall(COMMENT.sub("", path.read_text(encoding="utf-8"))):
                 chars.update(c for c in literal if ord(c) > 0x7E)
     return "".join(sorted(chars))
 

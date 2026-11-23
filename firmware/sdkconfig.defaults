@@ -30,3 +30,6 @@ CONFIG_LV_FONT_MONTSERRAT_20=y
 # USB 集線器：掃碼器、鍵盤、讀卡機經集線器接到高速 Type-C 孔（板子沒有 USB-A）。
 # 不開時集線器後面的裝置完全沒有反應。
 CONFIG_USB_HOST_HUBS_SUPPORTED=y
+
+# OTA 退回機制：新版開機後沒有被程式確認（ota_confirm_running）就重開機時，bootloader 退回上一版
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

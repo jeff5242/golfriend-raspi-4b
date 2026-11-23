@@ -7,6 +7,7 @@ app_state_t app_fsm_next(app_state_t state, app_event_t event)
         if (event == APP_EV_KEY || event == APP_EV_TOUCH) return APP_ST_INPUT;
         if (event == APP_EV_LINE) return APP_ST_QUERY;
         if (event == APP_EV_MAINT) return APP_ST_MENU;
+        if (event == APP_EV_UPDATE_START) return APP_ST_UPDATE;
         break;
     case APP_ST_INPUT:
         if (event == APP_EV_LINE) return APP_ST_QUERY;
@@ -31,6 +32,9 @@ app_state_t app_fsm_next(app_state_t state, app_event_t event)
     case APP_ST_MENU:
         if (event == APP_EV_MENU_CLOSE || event == APP_EV_TIMEOUT) return APP_ST_STANDBY;
         break;
+    case APP_ST_UPDATE:
+        if (event == APP_EV_UPDATE_END) return APP_ST_STANDBY;
+        break;
     }
     return state;
 }
@@ -45,6 +49,7 @@ const char *app_fsm_state_name(app_state_t state)
     case APP_ST_DISPENSE: return "DISPENSE";
     case APP_ST_ERROR:    return "ERROR";
     case APP_ST_MENU:     return "MENU";
+    case APP_ST_UPDATE:   return "UPDATE";
     }
     return "UNKNOWN";
 }
