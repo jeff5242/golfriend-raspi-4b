@@ -101,6 +101,30 @@ static void test_update_only_from_standby(void)
     CHECK_STR(app_fsm_state_name(APP_ST_UPDATE), "UPDATE");
 }
 
+static void test_camera_scan_waits_then_submits(void)
+{
+    /* Jeff 2026-11-23：鏡頭讀到碼之後跳到輸入畫面，給客人 5 秒檢查；不取消就自動送出 */
+    CHECK(app_fsm_next(APP_ST_STANDBY, APP_EV_SCAN) == APP_ST_SCANNED);
+    CHECK(app_fsm_next(APP_ST_INPUT, APP_EV_SCAN) == APP_ST_SCANNED);
+    CHECK(app_fsm_next(APP_ST_SCANNED, APP_EV_TIMEOUT) == APP_ST_QUERY);  /* 時間到自動送出 */
+    CHECK(app_fsm_next(APP_ST_SCANNED, APP_EV_LINE) == APP_ST_QUERY);     /* 按「確認」立刻送出 */
+    CHECK(app_fsm_next(APP_ST_SCANNED, APP_EV_KEY) == APP_ST_INPUT);      /* 按任何鍵：改成手動，不自動送出 */
+    CHECK(app_fsm_next(APP_ST_SCANNED, APP_EV_SCAN) == APP_ST_SCANNED);
+    CHECK(app_fsm_next(APP_ST_SCANNED, APP_EV_MAINT) == APP_ST_MENU);
+    CHECK_STR(app_fsm_state_name(APP_ST_SCANNED), "SCANNED");
+}
+
+static void test_camera_scan_ignored_while_busy(void)
+{
+    CHECK(app_fsm_next(APP_ST_QUERY, APP_EV_SCAN) == APP_ST_QUERY);
+    CHECK(app_fsm_next(APP_ST_CONFIRM, APP_EV_SCAN) == APP_ST_CONFIRM);
+    CHECK(app_fsm_next(APP_ST_DISPENSE, APP_EV_SCAN) == APP_ST_DISPENSE);
+    CHECK(app_fsm_next(APP_ST_ERROR, APP_EV_SCAN) == APP_ST_ERROR);
+    CHECK(app_fsm_next(APP_ST_MENU, APP_EV_SCAN) == APP_ST_MENU);
+    CHECK(app_fsm_next(APP_ST_UPDATE, APP_EV_SCAN) == APP_ST_UPDATE);
+    CHECK(app_fsm_next(APP_ST_SCANNED, APP_EV_UPDATE_START) == APP_ST_SCANNED);
+}
+
 int main(void)
 {
     RUN(test_happy_path_manual_input);
@@ -112,6 +136,8 @@ int main(void)
     RUN(test_touch_opens_input_only_from_standby);
     RUN(test_maintenance_code_opens_menu);
     RUN(test_update_only_from_standby);
+    RUN(test_camera_scan_waits_then_submits);
+    RUN(test_camera_scan_ignored_while_busy);
     RUN(test_state_names);
     return TEST_SUMMARY();
 }

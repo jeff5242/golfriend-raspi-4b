@@ -49,6 +49,7 @@ static const char *TAG = "app";
 #define RLOG_EXCEPTION(...) remote_log_event(REMOTE_LOG_EXCEPTION, "ERROR", __VA_ARGS__)
 
 #define INPUT_TIMEOUT_MS 10000  /* 同 Pi 版 TakeBallDialog 10 秒 */
+#define SCANNED_TIMEOUT_MS 5000 /* 鏡頭讀到碼之後，給客人檢查與取消的時間；時間到自動送出 */
 #define CONFIRM_DELAY_MS 2000   /* 同 Pi 版 QR 路徑 2 秒自動確認 */
 #define ERROR_SHOW_MS    3000
 #define MENU_TIMEOUT_MS   30000  /* 系統選單沒有操作 30 秒後回待機 */
@@ -110,20 +111,21 @@ static void on_scanner_line(const char *line, void *ctx)
     post(APP_EV_LINE, line);
 }
 
-/* 鏡頭讀到 QR Code：和掃碼器送來一整行相同，走同一條流程 */
+/* 鏡頭讀到 QR Code：先顯示在輸入畫面，倒數後自動送出（APP_ST_SCANNED） */
 static void on_camera_code(const char *code, void *ctx)
 {
     (void)ctx;
-    post(APP_EV_LINE, code);
+    post(APP_EV_SCAN, code);
 }
 
 /* 鏡頭的掃描狀態與預覽，轉給畫面。qr_scan_state_t 和 ui_scan_status_t 的順序相同。 */
 static void on_camera_status(int status, void *ctx)
 {
     (void)ctx;
-    ui_set_scan_status(status == QR_SCAN_READ    ? UI_SCAN_READ
-                       : status == QR_SCAN_FOUND ? UI_SCAN_FOUND
-                                                 : UI_SCAN_IDLE);
+    ui_set_scan_status(status == QR_SCAN_READ        ? UI_SCAN_READ
+                       : status == QR_SCAN_TOO_CLOSE ? UI_SCAN_TOO_CLOSE
+                       : status == QR_SCAN_FOUND     ? UI_SCAN_FOUND
+                                                     : UI_SCAN_IDLE);
 }
 
 static void on_camera_preview(const uint8_t *gray, int w, int h, void *ctx)
@@ -457,6 +459,10 @@ static bool enter_state(app_state_t state, app_event_t *follow)
     case APP_ST_INPUT:
         ui_show_input(s_typed, INPUT_TIMEOUT_MS);
         return false;
+    case APP_ST_SCANNED:
+        RLOG_OPERATION("qr scanned: code=%s", s_code);
+        ui_show_scanned(s_code, SCANNED_TIMEOUT_MS);
+        return false;
     case APP_ST_QUERY:
         ui_show_querying();
         *follow = do_query();
@@ -505,9 +511,19 @@ static app_event_t line_event(void)
 /* 記下輸入，回傳實際要處理的事件：觸控鍵盤按「確認」時，按鍵事件變成整行事件。 */
 static app_event_t record_input(const app_msg_t *msg)
 {
-    const bool accepting = s_state == APP_ST_STANDBY || s_state == APP_ST_INPUT;
+    const bool accepting =
+        s_state == APP_ST_STANDBY || s_state == APP_ST_INPUT || s_state == APP_ST_SCANNED;
     if (!accepting) {
         return msg->event;
+    }
+    if (msg->event == APP_EV_SCAN) {
+        if (s_state == APP_ST_SCANNED) {
+            return APP_EV_SCAN;  /* 已經在倒數：不換成另一組碼，也不重新倒數 */
+        }
+        /* 讀到的碼放進輸入欄；客人按鍵修改時從這組碼接著改 */
+        strlcpy(s_typed, msg->text, sizeof s_typed);
+        strlcpy(s_code, msg->text, sizeof s_code);
+        return APP_EV_SCAN;
     }
     if (msg->event == APP_EV_KEY) {
         if (app_typed_apply(s_typed, sizeof s_typed, msg->text[0])) {
@@ -563,6 +579,7 @@ static TickType_t state_timeout_ticks(app_state_t state)
 {
     switch (state) {
     case APP_ST_INPUT: return pdMS_TO_TICKS(INPUT_TIMEOUT_MS);
+    case APP_ST_SCANNED: return pdMS_TO_TICKS(SCANNED_TIMEOUT_MS);
     case APP_ST_ERROR: return pdMS_TO_TICKS(ERROR_SHOW_MS);
     case APP_ST_MENU:  return pdMS_TO_TICKS(MENU_TIMEOUT_MS);
     default:           return portMAX_DELAY;
@@ -689,12 +706,28 @@ void app_main(void)
     app_event_t unused;
     enter_state(APP_ST_STANDBY, &unused);
 
+    /*
+     * 逾時用「到期時間」計算。鏡頭每讀到一次碼就送一個事件；
+     * 如果每個事件都重新計時，手機停在鏡頭前時逾時永遠不會到。
+     */
+    TickType_t started = xTaskGetTickCount();
     for (;;) {
+        const TickType_t limit = state_timeout_ticks(s_state);
+        const TickType_t elapsed = xTaskGetTickCount() - started;
+        const TickType_t wait =
+            limit == portMAX_DELAY ? portMAX_DELAY : elapsed >= limit ? 0 : limit - elapsed;
         app_msg_t msg;
-        if (xQueueReceive(s_queue, &msg, state_timeout_ticks(s_state)) == pdTRUE) {
+        const app_state_t before = s_state;
+        bool restart = true;
+        if (xQueueReceive(s_queue, &msg, wait) == pdTRUE) {
             handle_event(msg.event, &msg);
+            /* 鏡頭事件沒有換狀態時不算操作，不重新計時 */
+            restart = msg.event != APP_EV_SCAN || s_state != before;
         } else {
             handle_event(timeout_event(s_state), NULL);
+        }
+        if (restart) {
+            started = xTaskGetTickCount();
         }
     }
 }

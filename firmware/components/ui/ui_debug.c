@@ -130,6 +130,7 @@ static void run_command(int c)
     case 'p': probe_i2c(); return;
     case 's': ui_show_standby(); break;
     case 'i': ui_show_input("1234567", 10000); break;
+    case 'r': ui_show_scanned("9557", 5000); break;
     case 'q': ui_show_querying(); break;
     case 'f': ui_show_confirm(50, 120, 70); break;
     case 'h': ui_show_confirm(50, 999999, 999999); break;

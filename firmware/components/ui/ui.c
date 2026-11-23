@@ -295,7 +295,19 @@ void ui_show_input(const char *typed, uint32_t timeout_ms)
 {
     ESP_LOGI(TAG, "[input] %s", typed != NULL ? typed : "");
     if (show_begin(UI_VIEW_INPUT, "", "")) {
+        ui_input_set_mode(false);
         ui_input_set_text(typed != NULL ? typed : "");
+        ui_input_restart_countdown(timeout_ms);
+        lvgl_port_unlock();
+    }
+}
+
+void ui_show_scanned(const char *code, uint32_t timeout_ms)
+{
+    ESP_LOGI(TAG, "[scanned] %s", code != NULL ? code : "");
+    if (show_begin(UI_VIEW_INPUT, "", "")) {
+        ui_input_set_mode(true);
+        ui_input_set_text(code != NULL ? code : "");
         ui_input_restart_countdown(timeout_ms);
         lvgl_port_unlock();
     }

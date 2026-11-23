@@ -19,24 +19,17 @@ extern "C" {
 bool qr_code_from_payload(const uint8_t *payload, size_t len, char *out, size_t out_size);
 
 /*
- * 防止同一張 QR Code 被重複送出。
- * 客人把手機停在鏡頭前時，每一張影像都會讀到同一組碼；只有第一次要送出。
- * 同一組碼離開鏡頭超過 hold_ms 之後，才可以再送一次。
- */
-typedef struct {
-    char last[QR_CODE_MAX];
-    uint32_t last_seen_ms;
-    bool has_last;
-} qr_gate_t;
-
-/* 回傳 true 表示這一次要送出。now_ms 可以溢位繞回。 */
-bool qr_gate_accept(qr_gate_t *gate, const char *code, uint32_t now_ms, uint32_t hold_ms);
-
-/*
- * RGB565（小端，每像素 2 bytes）縮成 8 位元灰階：寬高各取一半，用綠色通道當亮度。
+ * RGB565（小端，每像素 2 bytes）縮成 8 位元灰階：寬高各取一半，每 2x2 個像素的綠色通道取平均。
  * dst 必須有 (w/2)*(h/2) bytes。mirror 為 true 時每一列左右對調。
  */
 void qr_gray_half_from_rgb565(const uint8_t *src, int w, int h, uint8_t *dst, bool mirror);
+
+/*
+ * 取影像正中間 dw x dh 的區塊，不縮小，轉成 8 位元灰階。dst 必須有 dw*dh bytes。
+ * dw、dh 不得超過 w、h。
+ */
+void qr_gray_crop_from_rgb565(const uint8_t *src, int w, int h, int dw, int dh, uint8_t *dst,
+                              bool mirror);
 
 /*
  * 給畫面看的掃描狀態。每張影像的結果會跳動，所以狀態至少維持 hold_ms 才往回退。
@@ -44,7 +37,8 @@ void qr_gray_half_from_rgb565(const uint8_t *src, int w, int h, uint8_t *dst, bo
 typedef enum {
     QR_SCAN_IDLE = 0,  /* 影像裡沒有 QR Code */
     QR_SCAN_FOUND,     /* 看到 QR Code 的定位點，但還讀不出內容 */
-    QR_SCAN_READ,      /* 讀出內容了 */
+    QR_SCAN_TOO_CLOSE, /* 一維條碼只拍到半截：手機太近 */
+    QR_SCAN_READ,      /* 讀出內容並送出 */
 } qr_scan_state_t;
 
 typedef struct {
@@ -52,8 +46,8 @@ typedef struct {
     uint32_t since_ms;  /* 最後一次觀察到 shown 這個狀態的時間 */
 } qr_status_t;
 
-/* found：這張影像有 QR Code；read：這張影像讀出了內容。回傳畫面要顯示的狀態。 */
-qr_scan_state_t qr_status_update(qr_status_t *st, bool found, bool read, uint32_t now_ms,
+/* seen：這張影像的結果。回傳畫面要顯示的狀態。 */
+qr_scan_state_t qr_status_update(qr_status_t *st, qr_scan_state_t seen, uint32_t now_ms,
                                  uint32_t hold_ms);
 
 #ifdef __cplusplus

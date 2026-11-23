@@ -12,7 +12,7 @@ TESTS := test_hid_keymap test_scanner_line test_motor_plan test_api_sign \
          test_api_errors test_wifi_policy test_app_fsm test_app_dispense \
          test_scanner_devs test_motor test_app_typed test_app_net \
          test_settings_parse test_standby_header \
-         test_remote_log_format test_ota_policy test_qr_code
+         test_remote_log_format test_ota_policy test_qr_code test_code128
 
 SRC_test_hid_keymap    := $(COMP)/scanner/hid_keymap.c
 SRC_test_scanner_line  := $(COMP)/scanner/scanner_line.c
@@ -25,6 +25,7 @@ SRC_test_settings_parse := $(COMP)/settings/settings_parse.c
 SRC_test_standby_header := $(COMP)/standby_store/standby_header.c
 SRC_test_remote_log_format := $(COMP)/remote_log/remote_log_format.c
 SRC_test_ota_policy    := $(COMP)/ota/ota_policy.c
+SRC_test_code128      := $(COMP)/camera/code128.c
 SRC_test_qr_code       := $(COMP)/camera/qr_code.c
 SRC_test_app_net       := ../main/app_net.c
 SRC_test_app_typed     := ../main/app_typed.c
@@ -54,7 +55,8 @@ $(BIN)/%: %.c test_util.h $$(SRC_$$*) $(HDRS) | $(BIN)
 
 test: $(addprefix $(BIN)/,$(TESTS))
 	@fail=0; for t in $(TESTS); do ./$(BIN)/$$t || fail=1; done; \
-	 python3 ../tools/gen_ui_font.py --check || fail=1; exit $$fail
+	 python3 ../tools/gen_ui_font.py --check || fail=1; \
+	 python3 ../tools/check_ipa_json.py || fail=1; exit $$fail
 
 clean:
 	rm -rf $(BIN)

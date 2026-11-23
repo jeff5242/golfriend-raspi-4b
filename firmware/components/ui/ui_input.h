@@ -17,5 +17,8 @@ void ui_input_set_text(const char *typed);
 /* 隱藏時停止倒數動畫 */
 void ui_input_set_visible(bool visible);
 
+/* scanned 為 true：標題與提示改成「鏡頭已讀取，倒數後自動送出」；false：一般手動輸入 */
+void ui_input_set_mode(bool scanned);
+
 /* 倒數條從滿格開始，timeout_ms 後歸零 */
 void ui_input_restart_countdown(uint32_t timeout_ms);

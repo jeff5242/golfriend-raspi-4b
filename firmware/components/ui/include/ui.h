@@ -31,6 +31,12 @@ void ui_show_standby(void);
  */
 void ui_show_input(const char *typed, uint32_t timeout_ms);
 
+/*
+ * 鏡頭讀到領球碼：用輸入畫面顯示讀到的碼，倒數 timeout_ms 後由主流程自動送出。
+ * 客人按鍵盤上的任何鍵就改成手動輸入。
+ */
+void ui_show_scanned(const char *code, uint32_t timeout_ms);
+
 /* 查詢中（等 take_ball 回應） */
 void ui_show_querying(void);
 
@@ -66,8 +72,9 @@ void ui_set_lan_status(bool connected);
 
 /* 待機畫面右下角的鏡頭預覽：掃描狀態（文字與框線顏色） */
 typedef enum {
-    UI_SCAN_IDLE = 0,  /* 請將 QR Code 對準鏡頭 */
+    UI_SCAN_IDLE = 0,  /* 把條碼放進框裡 */
     UI_SCAN_FOUND,     /* 偵測到 QR Code，請拿穩 */
+    UI_SCAN_TOO_CLOSE, /* 請拿遠一點（一維條碼只拍到半截） */
     UI_SCAN_READ,      /* 已讀取 */
 } ui_scan_status_t;
 

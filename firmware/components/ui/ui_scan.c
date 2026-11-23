@@ -16,6 +16,9 @@ static const char *TAG = "ui_scan";
 #define SCAN_LABEL_H      40
 #define SCAN_MARGIN       16
 #define SCAN_LOCK_MS      30   /* 拿不到鎖就跳過這一張，不得卡住鏡頭工作 */
+#define SCAN_GUIDE_W_PCT  70   /* 對準框佔預覽的寬、高（%） */
+#define SCAN_GUIDE_H_PCT  70
+#define SCAN_GUIDE_COLOR  0x35D07F
 #define SCAN_BLANK_GRAY   0xEE /* 還沒有影像時的底色 */
 #define SCAN_BORDER_IDLE  0x9AA79F
 #define SCAN_BORDER_FOUND 0xE0A100
@@ -31,10 +34,13 @@ static ui_scan_status_t s_status = UI_SCAN_IDLE;
 
 static void apply_status(void)
 {
-    const char *text = "請將 QR Code 對準鏡頭";
+    const char *text = "把條碼放進框裡";
     uint32_t color = SCAN_BORDER_IDLE;
     if (s_status == UI_SCAN_FOUND) {
         text = "偵測到 QR Code，請拿穩";
+        color = SCAN_BORDER_FOUND;
+    } else if (s_status == UI_SCAN_TOO_CLOSE) {
+        text = "請拿遠一點";
         color = SCAN_BORDER_FOUND;
     } else if (s_status == UI_SCAN_READ) {
         text = "已讀取";
@@ -73,6 +79,17 @@ void ui_scan_build(lv_obj_t *parent)
     lv_image_set_src(s_image, &s_dsc);
     lv_obj_align(s_image, LV_ALIGN_TOP_MID, 0, SCAN_PAD);
     lv_obj_set_clickable(s_image, false);
+
+    /* 對準框：條碼或 QR Code 整個放進框裡，距離就差不多對了 */
+    lv_obj_t *guide = lv_obj_create(s_panel);
+    lv_obj_remove_style_all(guide);
+    lv_obj_set_size(guide, SCAN_W * SCAN_GUIDE_W_PCT / 100, SCAN_H * SCAN_GUIDE_H_PCT / 100);
+    lv_obj_align_to(guide, s_image, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_border_width(guide, 3, 0);
+    lv_obj_set_style_border_color(guide, lv_color_hex(SCAN_GUIDE_COLOR), 0);
+    lv_obj_set_style_border_opa(guide, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(guide, 6, 0);
+    lv_obj_set_clickable(guide, false);
 
     s_label = lv_label_create(s_panel);
     lv_obj_set_style_text_font(s_label, &ui_font_tc_24, 0);
